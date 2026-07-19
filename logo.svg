@@ -1,45 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
-  <defs>
-    <linearGradient id="blade" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#e8e8e8"/>
-      <stop offset="100%" stop-color="#a0a0a0"/>
-    </linearGradient>
-    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#e63946"/>
-      <stop offset="100%" stop-color="#b71c1c"/>
-    </linearGradient>
-  </defs>
-
-  <!-- main body -->
-  <rect x="52" y="72" width="152" height="132" rx="20" ry="20" fill="url(#body)" stroke="#8b0000" stroke-width="2"/>
-
-  <!-- white cross -->
-  <rect x="116" y="104" width="24" height="60" rx="3" fill="#fff"/>
-  <rect x="104" y="116" width="48" height="24" rx="3" fill="#fff"/>
-
-  <!-- blade -->
-  <path d="M128 72 Q128 28 140 24 Q148 22 148 32 L148 72 Z" fill="url(#blade)" stroke="#888" stroke-width="1.5"/>
-  <line x1="128" y1="72" x2="128" y2="55" stroke="#ccc" stroke-width="0.5"/>
-
-  <!-- corkscrew -->
-  <path d="M74 140 Q70 132 76 126 Q82 120 76 114 Q70 108 76 102 Q82 96 76 90" fill="none" stroke="#c0c0c0" stroke-width="3" stroke-linecap="round"/>
-  <line x1="74" y1="88" x2="74" y2="82" stroke="#c0c0c0" stroke-width="3" stroke-linecap="round"/>
-
-  <!-- scissors hint -->
-  <circle cx="190" cy="115" r="4" fill="none" stroke="#c0c0c0" stroke-width="1.5"/>
-  <circle cx="190" cy="145" r="4" fill="none" stroke="#c0c0c0" stroke-width="1.5"/>
-  <line x1="190" y1="119" x2="190" y2="141" stroke="#c0c0c0" stroke-width="1.5"/>
-
-  <!-- saw hint -->
-  <rect x="66" y="175" width="120" height="4" rx="1" fill="#c0c0c0" opacity="0.5"/>
-
-  <!-- key ring -->
-  <circle cx="128" cy="196" r="8" fill="none" stroke="#c0c0c0" stroke-width="2"/>
-  <circle cx="128" cy="196" r="3" fill="#8b0000"/>
-
-  <!-- rivets -->
-  <circle cx="88" cy="100" r="2.5" fill="#8b0000" opacity="0.6"/>
-  <circle cx="168" cy="100" r="2.5" fill="#8b0000" opacity="0.6"/>
-  <circle cx="88" cy="170" r="2.5" fill="#8b0000" opacity="0.6"/>
-  <circle cx="168" cy="170" r="2.5" fill="#8b0000" opacity="0.6"/>
+  <rect x="8" y="8" width="240" height="240" rx="16" fill="#e63946"/>
+  <rect x="98" y="40" width="60" height="176" rx="6" fill="#fff"/>
+  <rect x="40" y="98" width="176" height="60" rx="6" fill="#fff"/>
 </svg>
