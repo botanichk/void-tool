@@ -3,6 +3,7 @@
 
 import argparse
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -426,7 +427,7 @@ _void-tool_completions() {
     local prev="${COMP_WORDS[COMP_CWORD-1]}"
 
     if [[ $COMP_CWORD -eq 1 ]]; then
-        COMPREPLY=($(compgen -W "install update fix clean trigger completions menu" -- "$cur"))
+        COMPREPLY=($(compgen -W "install update fix clean trigger completions menu self-install" -- "$cur"))
     elif [[ $COMP_CWORD -eq 2 ]]; then
         case "$prev" in
             install) COMPREPLY=($(compgen -W "zen ppqt nvidia pipewire" -- "$cur")) ;;
@@ -502,6 +503,76 @@ def cmd_list_modules(args):
     config = load_config()
     for name in config.get("modules", {}):
         print(name)
+
+
+# ── self-install ─────────────────────────────────────────
+
+def cmd_self_install(args):
+    """Install void-tool from repo clone to system (~/.local/bin)."""
+    repo_dir = Path(args.source).resolve()
+    scripts_src = repo_dir / "scripts"
+    krs_src = repo_dir / "krs"
+
+    if not (repo_dir / "void-tool").exists():
+        print(rd(f"✗ void-tool not found in {repo_dir}"))
+        return 1
+
+    print(f"  {bl('⟳')} Installing void-tool from {repo_dir}...")
+
+    # 1. copy main script
+    bin_dir = Path.home() / ".local" / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(str(repo_dir / "void-tool"), str(bin_dir / "void-tool"))
+    (bin_dir / "void-tool").chmod(0o755)
+    print(f"  ✓ {gr('void-tool')} → {bin_dir}")
+
+    # 2. copy scripts
+    if scripts_src.exists():
+        user_scripts = Path.home() / "scripts"
+        user_scripts.mkdir(parents=True, exist_ok=True)
+        for f in scripts_src.glob("*.sh"):
+            shutil.copy2(str(f), str(user_scripts / f.name))
+            (user_scripts / f.name).chmod(0o755)
+            print(f"  ✓ {f.name} → {user_scripts}")
+
+    # 3. build and install krs
+    krs_bin = bin_dir / "krs"
+    if krs_src.exists():
+        cargo = shutil.which("cargo")
+        if cargo:
+            print(f"  {bl('⟳')} Building krs (Rust)...")
+            r = subprocess.run(
+                [cargo, "build", "--release"],
+                cwd=str(krs_src), capture_output=True, text=True, timeout=180)
+            if r.returncode == 0:
+                built = krs_src / "target" / "release" / "krs"
+                if built.exists():
+                    shutil.copy2(str(built), str(krs_bin))
+                    krs_bin.chmod(0o755)
+                    print(f"  ✓ krs (Rust) → {krs_bin}")
+            else:
+                print(f"  {yl('⚠')} krs build failed — install cargo and run manually")
+                print(f"     cd {krs_src} && cargo build --release && cp target/release/krs ~/.local/bin/")
+        else:
+            print(f"  {yl('⚠')} cargo not found — install rustup first, then build krs manually")
+            print(f"     cd {krs_src} && cargo build --release && cp target/release/krs ~/.local/bin/")
+
+    # 4. create default config
+    config_file = CONFIG_DIR / "config.toml"
+    if not config_file.exists():
+        config_file.parent.mkdir(parents=True, exist_ok=True)
+        config_file.write_text(DEFAULT_CONFIG)
+        print(f"  ✓ config → {config_file}")
+    else:
+        print(f"  ✓ config exists → {config_file}")
+
+    # 5. install completions
+    cmd_completions(argparse.Namespace(shell="install"))
+
+    print(f"\n  {gr('✓')} void-tool installed. Reload shell or run:")
+    print(f"     exec $SHELL")
+    print(f"     void-tool --version")
+    return 0
 
 
 # ── menu ────────────────────────────────────────────────
@@ -614,6 +685,9 @@ def make_parser():
                        help="Shell to generate completions for (install = auto-detect)")
 
     sub.add_parser("menu", help="Interactive TUI (arrow keys)")
+    psi = sub.add_parser("self-install", help="Install void-tool from repo clone to system")
+    psi.add_argument("--source", default=".",
+                      help="Path to repo root (default: current dir)")
     sub.add_parser("_list_modules", help=argparse.SUPPRESS)
 
     return p
@@ -635,6 +709,7 @@ def main():
         "trigger":       cmd_trigger,
         "completions":   cmd_completions,
         "menu":          cmd_menu,
+        "self-install":  cmd_self_install,
         "_list_modules": cmd_list_modules,
     }
 
