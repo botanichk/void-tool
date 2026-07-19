@@ -659,7 +659,7 @@ def make_parser():
     sub = p.add_subparsers(dest="command")
 
     # install
-    pi = sub.add_parser("install", help="Install a package (zen, ppqt)")
+    pi = sub.add_parser("install", help="Install a package (zen, ppqt, nvidia, pipewire)")
     pi.add_argument("packages", nargs="+", choices=["zen", "ppqt", "nvidia", "pipewire"],
                     help="Package(s) to install")
 
