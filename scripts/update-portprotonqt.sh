@@ -80,9 +80,27 @@ sed -i "/^checksum=/ s/[a-f0-9]\{64\}/$new_checksum/" "$TEMPLATE"
 
 echo "📝 Шаблон обновлён: $current_ver → $latest_ver (revision=1)"
 
+# --- bootstrap void-packages if needed ---
+VP="$HOME/void-packages"
+if [[ ! -d "$VP" ]]; then
+    echo "📥 Клонирую void-packages..."
+    git clone https://github.com/void-linux/void-packages.git "$VP"
+fi
+if [[ ! -d "$VP/masterdir" ]]; then
+    echo "🔧 Выполняю binary-bootstrap..."
+    cd "$VP"
+    if ! ./xbps-src binary-bootstrap; then
+        echo "❌ binary-bootstrap не удался"
+        echo "   Возможно проблема с файловой системой (chown)."
+        echo "   Убедись, что $VP на ext4/btrfs, не FAT/NTFS."
+        exit 1
+    fi
+    cd - >/dev/null
+fi
+
 # --- build ---
 echo "🔨 Собираю пакет..."
-cd "$HOME/void-packages"
+cd "$VP"
 if ! ./xbps-src pkg portprotonqt; then
     echo "❌ Сборка не удалась, откатываю шаблон..."
     mv "$TEMPLATE.bak" "$TEMPLATE"
