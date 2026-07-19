@@ -40,7 +40,21 @@ if [[ $EUID -ne 0 ]]; then
     exit 1
 fi
 
+# Определяем реального пользователя (через sudo)
+REAL_USER="${SUDO_USER:-ig_ro}"
+REAL_HOME="$(getent passwd "$REAL_USER" | cut -d: -f6)"
+
 log "=== void-tool PipeWire installer ==="
+log "User: $REAL_USER, Home: $REAL_HOME"
+
+# Определяем DE
+DE="unknown"
+if [ -f "$REAL_HOME/.config/hypr/hyprland.conf" ] || [ -f "$REAL_HOME/.config/hypr/hyprland.lua" ]; then
+    DE="hyprland"
+elif [ -f "$REAL_HOME/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-session.xml" ]; then
+    DE="xfce"
+fi
+log "Detected DE: $DE"
 
 # ── 1. Remove pulseaudio runit service ──────────────────
 if [ -d "/var/service/pulseaudio" ]; then
@@ -51,7 +65,7 @@ else
 fi
 
 # ── 2. Disable pulseaudio autospawn ─────────────────────
-PULSE_CONF_DIR="/home/ig_ro/.config/pulse"
+PULSE_CONF_DIR="$REAL_HOME/.config/pulse"
 mkdir -p "$PULSE_CONF_DIR"
 if ! grep -q "autospawn=no" "$PULSE_CONF_DIR/client.conf" 2>/dev/null; then
     log "Blocking pulseaudio autospawn..."
@@ -64,8 +78,8 @@ else
 fi
 
 # ── 3. Remove conflicting user configs ──────────────────
-for f in /home/ig_ro/.config/wireplumber/wireplumber.conf \
-         /home/ig_ro/.config/pipewire/pipewire.conf.d/10-portal.conf; do
+for f in "$REAL_HOME/.config/wireplumber/wireplumber.conf" \
+         "$REAL_HOME/.config/pipewire/pipewire.conf.d/10-portal.conf"; do
     if [ -f "$f" ]; then
         log "Removing conflicting config: $f"
         rm -f "$f"
@@ -73,11 +87,15 @@ for f in /home/ig_ro/.config/wireplumber/wireplumber.conf \
 done
 
 # ── 4. Install PipeWire packages ────────────────────────
-log "Installing PipeWire packages..."
-xbps-install -Sy pipewire wireplumber alsa-pipewire
+PKGS=(pipewire wireplumber alsa-pipewire)
+if [ "$DE" = "xfce" ]; then
+    PKGS+=(pavucontrol xfce4-pulseaudio-plugin)
+fi
+log "Installing: ${PKGS[*]}"
+xbps-install -Sy "${PKGS[@]}"
 
 # ── 5. Create startup script ────────────────────────────
-START_SCRIPT="/home/ig_ro/.config/start-audio.sh"
+START_SCRIPT="$REAL_HOME/.config/start-audio.sh"
 log "Creating $START_SCRIPT..."
 cat > "$START_SCRIPT" << 'XEOF'
 #!/bin/bash
@@ -133,19 +151,54 @@ pactl set-sink-mute alsa_output.pci-0000_01_00.1.hdmi-stereo 0 2>/dev/null
 XEOF
 chmod +x "$START_SCRIPT"
 
-# ── 6. Add exec-once to Hyprland ────────────────────────
-HYPR_CFG="/home/ig_ro/.config/hypr/hyprland.lua"
-HYPR_CONF="/home/ig_ro/.config/hypr/hyprland.conf"
-if [ -f "$HYPR_CFG" ] && ! grep -q "start-audio.sh" "$HYPR_CFG" 2>/dev/null; then
-    log "Hyprland Lua config found — add exec-once manually to $HYPR_CFG"
-    log "  exec-once = /home/ig_ro/.config/start-audio.sh"
-elif [ -f "$HYPR_CONF" ] && ! grep -q "start-audio.sh" "$HYPR_CONF" 2>/dev/null; then
-    log "Adding exec-once to $HYPR_CONF..."
-    echo "exec-once = /home/ig_ro/.config/start-audio.sh" >> "$HYPR_CONF"
-    echo "env = PULSE_SERVER,unix:/run/user/1000/pulse/native" >> "$HYPR_CONF"
-else
-    log "exec-once for audio already present in Hyprland config"
-fi
+# ── 6. Autostart (DE-agnostic) ──────────────────────────
+case "$DE" in
+    hyprland)
+        HYPR_LUA="$REAL_HOME/.config/hypr/hyprland.lua"
+        HYPR_CFG="$REAL_HOME/.config/hypr/hyprland.conf"
+        if [ -f "$HYPR_LUA" ] && ! grep -q "start-audio.sh" "$HYPR_LUA" 2>/dev/null; then
+            log "Hyprland Lua — add exec-once manually:"
+            log "  exec-once = $START_SCRIPT"
+        elif [ -f "$HYPR_CFG" ] && ! grep -q "start-audio.sh" "$HYPR_CFG" 2>/dev/null; then
+            log "Adding exec-once to $HYPR_CFG..."
+            echo "exec-once = $START_SCRIPT" >> "$HYPR_CFG"
+            echo "env = PULSE_SERVER,unix:/run/user/1000/pulse/native" >> "$HYPR_CFG"
+        else
+            log "Autostart already configured for Hyprland"
+        fi
+        ;;
+    xfce)
+        AUTOSTART_DIR="$REAL_HOME/.config/autostart"
+        mkdir -p "$AUTOSTART_DIR"
+        DESKTOP_FILE="$AUTOSTART_DIR/start-audio.desktop"
+        if [ ! -f "$DESKTOP_FILE" ]; then
+            log "Creating XFCE autostart entry..."
+            cat > "$DESKTOP_FILE" << XEOF
+[Desktop Entry]
+Type=Application
+Name=Audio Stack (PipeWire)
+Exec=$START_SCRIPT
+Hidden=false
+NoDisplay=false
+X-XFCE-Autostart-Phase=2
+X-XFCE-Autostart-Enabled=true
+XEOF
+            log "XFCE autostart created: $DESKTOP_FILE"
+        else
+            log "XFCE autostart already exists"
+        fi
+        ;;
+    *)
+        log "Unknown DE ($DE) — autostart not configured"
+        log "Add $START_SCRIPT to your DE's autostart manually"
+        ;;
+esac
 
+log ""
+log "═══════════════════════════════════════════"
 log "Done. Reboot recommended."
-log "After reboot: pactl info, pactl list sinks short"
+log "After reboot:"
+log "  pactl info                   # проверить, что PipeWire работает"
+log "  pactl list sinks short       # посмотреть устройства вывода"
+log "  pavucontrol                  # (для XFCE) GUI громкости"
+log "═══════════════════════════════════════════"
