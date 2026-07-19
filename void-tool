@@ -1,0 +1,661 @@
+#!/usr/bin/env python3
+"""void-tool — Swiss army knife for Void Linux (XBPS helpers + audio fix)."""
+
+import argparse
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+CONFIG_DIR = Path.home() / ".config" / "void-update"
+STATE_DIR = Path.home() / ".local" / "state" / "void-update"
+CONFIG_FILE = CONFIG_DIR / "config.toml"
+STATE_FILE = STATE_DIR / "last-check"
+SCRIPTS_DIR = Path.home() / "scripts"
+
+DEFAULT_CONFIG = """\
+interval_days = 7
+
+[modules.zen]
+enabled = true
+script = "update-zen-browser.sh"
+
+[modules.ppqt]
+enabled = true
+script = "update-portprotonqt.sh"
+"""
+
+TOOL_NAME = "void-tool"
+VERSION = "0.2.0"
+TAGLINE = f"rSAkv 🦀 rusty Swiss Army knife from the Void v{VERSION}"
+
+
+def load_config():
+    if not CONFIG_FILE.exists():
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        CONFIG_FILE.write_text(DEFAULT_CONFIG)
+
+    try:
+        import tomllib
+    except ImportError:
+        print("ERROR: Python >= 3.11 required (tomllib)", file=sys.stderr)
+        sys.exit(1)
+
+    with open(CONFIG_FILE, "rb") as f:
+        return tomllib.load(f)
+
+
+def run_script(script_name, extra_args=None):
+    script_path = SCRIPTS_DIR / script_name
+    if not script_path.exists():
+        return {"rc": -1, "out": "", "err": f"Script not found: {script_path}"}
+
+    cmd = [str(script_path)]
+    if extra_args:
+        cmd.extend(extra_args)
+
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        return {"rc": r.returncode, "out": r.stdout, "err": r.stderr}
+    except subprocess.TimeoutExpired:
+        return {"rc": -1, "out": "", "err": "Timeout (600s)"}
+    except Exception as e:
+        return {"rc": -1, "out": "", "err": str(e)}
+
+
+def c(code, text):
+    if not sys.stdout.isatty():
+        return text
+    return f"\033[{code}m{text}\033[0m"
+
+
+gr = lambda t: c("32", t)
+yl = lambda t: c("33", t)
+rd = lambda t: c("31", t)
+bl = lambda t: c("34", t)
+bd = lambda t: c("1", t)
+
+
+# ── update ──────────────────────────────────────────────
+
+def cmd_update_status(args):
+    config = load_config()
+    modules = config.get("modules", {})
+
+    print(f"\n{'Module':<20} {'Status':<16} {'Info'}")
+    print("-" * 60)
+
+    for name, mod in modules.items():
+        if not mod.get("enabled", True):
+            print(f"{name:<20} {yl('disabled'):<16}")
+            continue
+
+        result = run_script(mod["script"], ["--check"])
+        info = result["out"].strip().split("\n")[-1] if result["out"] else ""
+        info = info.replace("✅", "").replace("⬆️", "→").strip()
+
+        if result["rc"] == 0:
+            print(f"{name:<20} {gr('up-to-date'):<16} {info}")
+        elif result["rc"] == 1:
+            print(f"{name:<20} {rd('update avail'):<16} {info}")
+        else:
+            print(f"{name:<20} {rd('error'):<16} {result['err'].strip()}")
+
+
+def cmd_update_check(args):
+    config = load_config()
+    modules = config.get("modules", {})
+    any_updates = False
+
+    for name, mod in modules.items():
+        if not mod.get("enabled", True):
+            continue
+
+        print(f"• {name}... ", end="", flush=True)
+        result = run_script(mod["script"], ["--check"])
+
+        if result["rc"] == 0:
+            print(gr("up-to-date"))
+        elif result["rc"] == 1:
+            info = result["out"].strip().split("\n")[-1]
+            print(rd("update available"))
+            print(f"  {info}")
+            any_updates = True
+        else:
+            print(rd("error"))
+            if result["err"]:
+                print(f"  {result['err'].strip()}")
+
+    if any_updates:
+        print(f"\n{bl('→')} Run {bd(f'{TOOL_NAME} update')} to apply updates")
+        return 1
+    else:
+        print(f"\n{gr('✓')} All modules up to date")
+        return 0
+
+
+def cmd_update_run(args):
+    config = load_config()
+    modules = config.get("modules", {})
+    names = args.modules or list(modules.keys())
+
+    for name in names:
+        if name not in modules:
+            print(rd(f"Unknown module: {name}"))
+            continue
+        if not modules[name].get("enabled", True):
+            print(yl(f"Skipping disabled module: {name}"))
+            continue
+
+        print(f"\n{bl('⟳')} Updating {bd(name)}...")
+        result = run_script(modules[name]["script"])
+
+        for line in result["out"].split("\n"):
+            if line.strip():
+                print(f"  {line}")
+
+        if result["rc"] == 0:
+            print(gr(f"✓ {name} updated successfully"))
+        else:
+            print(rd(f"✗ {name} update failed (exit {result['rc']})"))
+            for line in result["err"].split("\n"):
+                if line.strip():
+                    print(f"  {rd(line)}")
+
+
+# ── install ─────────────────────────────────────────────
+
+def cmd_install(args):
+    config = load_config()
+    modules = config.get("modules", {})
+
+    for name in args.packages:
+        if name not in modules:
+            print(rd(f"Unknown package: {name}"))
+            continue
+        if not modules[name].get("enabled", True):
+            print(yl(f"Package disabled in config: {name}"))
+            continue
+
+        print(f"\n{bl('⟳')} Installing {bd(name)}...")
+        result = run_script(modules[name]["script"], ["--install"])
+
+        for line in result["out"].split("\n"):
+            if line.strip():
+                print(f"  {line}")
+
+        if result["rc"] == 0:
+            print(gr(f"✓ {name} installed"))
+        else:
+            print(rd(f"✗ {name} install failed (exit {result['rc']})"))
+            for line in result["err"].split("\n"):
+                if line.strip():
+                    print(f"  {rd(line)}")
+
+
+# ── fix ─────────────────────────────────────────────────
+
+def cmd_fix_health(args):
+    """Check PipeWire stack health and restart if needed."""
+    krs_bin = Path.home() / ".local" / "bin" / "krs"
+    if krs_bin.exists():
+        r = subprocess.run([str(krs_bin), "health"], capture_output=True, text=True, timeout=60)
+        for line in r.stdout.split("\n"):
+            if line.strip():
+                print(f"  {line}")
+        if r.returncode != 0:
+            for line in r.stderr.split("\n"):
+                if line.strip():
+                    print(f"  {rd(line)}")
+        return r.returncode
+
+    print(f"  {bl('🔊')} Audio health check (Python fallback)...")
+
+    PULSE_PID = Path("/run/user/1000/pulse/pid")
+    PULSE_SOCK = Path("/run/user/1000/pulse/native")
+    WP_LOG = Path("/tmp/void-tool-wp.log")
+
+    def _running(prog, use_full=False):
+        cmd = ["pgrep", "-x"] if not use_full else ["pgrep", "-f"]
+        r = subprocess.run(cmd + [prog], capture_output=True, timeout=5)
+        return r.returncode == 0
+
+    def _kill_all():
+        for sig in ["-15", "-9"]:
+            subprocess.run(["pkill", sig, "-x", "wireplumber"],
+                           capture_output=True, timeout=5)
+            subprocess.run(["pkill", sig, "-f", r"pipewire.*pipewire-pulse"],
+                           capture_output=True, timeout=5)
+            subprocess.run(["pkill", sig, "-x", "pipewire"],
+                           capture_output=True, timeout=5)
+            time.sleep(1)
+
+    def _start_stack():
+        subprocess.Popen(["/usr/bin/pipewire"],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        time.sleep(2)
+        subprocess.Popen(["/usr/bin/wireplumber"],
+                         stdout=subprocess.DEVNULL,
+                         stderr=open(WP_LOG, "w"))
+        time.sleep(1)
+        subprocess.Popen(
+            ["/usr/bin/pipewire", "-c", "/usr/share/pipewire/pipewire-pulse.conf"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def _wait_for_pulse(timeout=15):
+        for _ in range(timeout):
+            time.sleep(1)
+            r = subprocess.run(["pactl", "info"], capture_output=True, timeout=3)
+            if r.returncode == 0:
+                return True
+        return False
+
+    def _has_real_sinks():
+        r = subprocess.run(["pactl", "list", "short", "sinks"],
+                           capture_output=True, text=True, timeout=5)
+        sinks = [l for l in r.stdout.split("\n") if l.strip()]
+        real = [s for s in sinks if "auto_null" not in s]
+        return len(real) > 0
+
+    def _wp_is_stuck():
+        if not WP_LOG.exists():
+            return False
+        log = WP_LOG.read_text()
+        return "Unexpected reply" in log
+
+    def _restart_dbus():
+        dbus_pid = Path("/run/user/1000/dbus.pid")
+        if dbus_pid.exists():
+            pid = dbus_pid.read_text().strip()
+            subprocess.run(["kill", pid], capture_output=True, timeout=5)
+            time.sleep(2)
+        subprocess.Popen(["dbus-daemon", "--session",
+                          "--address=unix:path=/run/user/1000/bus", "--nofork"],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        for _ in range(10):
+            time.sleep(0.5)
+            r = subprocess.run(
+                ["timeout", "2", "dbus-send", "--session",
+                 "--dest=org.freedesktop.DBus", "--type=method_call",
+                 "--print-reply", "/org/freedesktop/DBus",
+                 "org.freedesktop.DBus.ListNames"],
+                capture_output=True, timeout=5)
+            if r.returncode == 0:
+                return True
+        return False
+
+    def _restart_stack():
+        _kill_all()
+        for f in [PULSE_PID, PULSE_SOCK]:
+            try:
+                f.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+        _start_stack()
+
+        if not _wait_for_pulse():
+            if _wp_is_stuck():
+                print(f"  {yl('⟳')} WirePlumber stuck on D-Bus — restarting session bus...")
+                _kill_all()
+                if not _restart_dbus():
+                    return False
+                _start_stack()
+                if not _wait_for_pulse():
+                    return False
+            else:
+                return False
+
+        if not _has_real_sinks():
+            print(f"  {yl('⚠')} Pulse OK but no real sinks — waiting...")
+            if not _wait_for_pulse(timeout=10):
+                return False
+
+        subprocess.run(
+            ["pactl", "set-default-sink", "alsa_output.pci-0000_01_00.1.hdmi-stereo"],
+            capture_output=True, timeout=5)
+        subprocess.run(
+            ["pactl", "set-sink-volume", "alsa_output.pci-0000_01_00.1.hdmi-stereo", "100%"],
+            capture_output=True, timeout=5)
+        subprocess.run(
+            ["pactl", "set-sink-mute", "alsa_output.pci-0000_01_00.1.hdmi-stereo", "0"],
+            capture_output=True, timeout=5)
+        return True
+
+    statuses = {
+        "pipewire": _running("pipewire"),
+        "wireplumber": _running("wireplumber"),
+        "pipewire-pulse": _running("pipewire-pulse", use_full=True),
+    }
+
+    r = subprocess.run(["timeout", "3", "pactl", "info"], capture_output=True, timeout=5)
+    statuses["pulse-socket"] = r.returncode == 0
+
+    if all(statuses.values()) and _has_real_sinks():
+        print(f"  {gr('✓')} PipeWire stack healthy")
+        return 0
+
+    for name, ok in statuses.items():
+        print(f"  {'  ' if ok else rd('✗')} {name}: {gr('running') if ok else rd('dead')}")
+
+    print(f"  {yl('⟳')} Restarting audio stack...")
+    if _restart_stack():
+        print(f"  {gr('✓')} Audio stack restarted, HDMI default")
+    else:
+        print(f"  {rd('✗')} Audio restart failed — check manually")
+        return 1
+
+    return 0
+
+
+# ── clean ───────────────────────────────────────────────
+
+def cmd_clean(args):
+    any_errors = False
+
+    if "builds" in args.targets:
+        print(f"• xbps-src clean... ", end="", flush=True)
+        r = subprocess.run(
+            [str(Path.home() / "void-packages" / "xbps-src"), "clean"],
+            capture_output=True, text=True, timeout=300)
+        if r.returncode == 0:
+            print(gr("done"))
+        else:
+            print(rd("error"))
+            print(f"  {r.stderr.strip()}")
+            any_errors = True
+
+    if "cache" in args.targets:
+        cache_dirs = [
+            (Path.home() / ".cache" / "pip", "pip"),
+            (Path.home() / ".cache" / "thumbnails", "thumbnails"),
+            (Path.home() / ".cache" / "mpv" / "chapters", "mpv chapters"),
+            (Path.home() / ".cache" / "wireplumber", "wireplumber"),
+        ]
+        for d, label in cache_dirs:
+            if d.exists():
+                size = sum(f.stat().st_size for f in d.rglob("*") if f.is_file())
+                subprocess.run(["rm", "-rf", str(d)], capture_output=True, timeout=30)
+                print(f"  {label}: {size / 1024**2:.1f} MB — {gr('cleaned')}")
+            else:
+                print(f"  {label}: {yl('empty')}")
+
+    if "prefixes" in args.targets:
+        prefixes = Path.home() / "PortProtonQt" / "prefixes"
+        if prefixes.exists():
+            size = sum(f.stat().st_size for f in prefixes.rglob("*") if f.is_file())
+            print(f"  Prefixes: {size / 1024**3:.1f} GB — {yl('skipped')} (rm manually)")
+        else:
+            print(f"  Prefixes: {yl('not found')}")
+
+    return 1 if any_errors else 0
+
+
+# ── trigger ─────────────────────────────────────────────
+
+def cmd_trigger(args):
+    config = load_config()
+    interval = config.get("interval_days", 7)
+
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+
+    last_run = 0
+    if STATE_FILE.exists():
+        last_run = int(STATE_FILE.read_text().strip())
+
+    now = int(time.time())
+    elapsed = (now - last_run) / 86400
+
+    if elapsed < interval:
+        return 0
+
+    STATE_FILE.write_text(str(now))
+    print(f"{TOOL_NAME}: checking (last check {elapsed:.0f}d ago)")
+    rc = cmd_update_check(args)
+    print()
+    cmd_fix_health(args)
+    return rc
+
+
+# ── completions ─────────────────────────────────────────
+
+BASH_COMPLETION = """\
+_void-tool_completions() {
+    local cur="${COMP_WORDS[COMP_CWORD]}"
+    local prev="${COMP_WORDS[COMP_CWORD-1]}"
+
+    if [[ $COMP_CWORD -eq 1 ]]; then
+        COMPREPLY=($(compgen -W "install update fix clean trigger completions menu" -- "$cur"))
+    elif [[ $COMP_CWORD -eq 2 ]]; then
+        case "$prev" in
+            install) COMPREPLY=($(compgen -W "zen ppqt nvidia pipewire" -- "$cur")) ;;
+            update)  COMPREPLY=($(compgen -W "check status $(void-tool _list_modules 2>/dev/null)" -- "$cur")) ;;
+            fix)     COMPREPLY=($(compgen -W "health" -- "$cur")) ;;
+            clean)   COMPREPLY=($(compgen -W "builds cache prefixes" -- "$cur")) ;;
+            completions) COMPREPLY=($(compgen -W "bash zsh install" -- "$cur")) ;;
+        esac
+    fi
+}
+complete -F _void-tool_completions void-tool
+"""
+
+ZSH_COMPLETION = """\
+#compdef void-tool
+
+_void-tool() {
+    local state
+
+    _arguments \\
+        '1: :->command' \\
+        '*: :->args'
+
+    case $state in
+        command)
+            _values 'command' install update fix clean trigger completions menu
+            ;;
+        args)
+            case $words[2] in
+                install) _values 'package' zen ppqt nvidia pipewire ;;
+                update)  _values 'action' check status $(void-tool _list_modules 2>/dev/null) ;;
+                fix)     _values 'target' health ;;
+                clean)   _values 'target' builds cache prefixes ;;
+                completions) _values 'shell' bash zsh install ;;
+            esac
+            ;;
+    esac
+}
+
+_void-tool
+"""
+
+BASH_COMP_DIR = Path.home() / ".local" / "share" / "bash-completion" / "completions"
+ZSH_COMP_DIR = Path.home() / ".local" / "share" / "zsh" / "site-functions"
+
+
+def cmd_completions(args):
+    name = "void-tool"
+    if args.shell == "bash":
+        print(BASH_COMPLETION, end="")
+    elif args.shell == "zsh":
+        print(ZSH_COMPLETION, end="")
+    elif args.shell == "install":
+        shell = Path(os.environ.get("SHELL", "/bin/bash")).name
+        if shell == "zsh":
+            ZSH_COMP_DIR.mkdir(parents=True, exist_ok=True)
+            (ZSH_COMP_DIR / f"_{name}").write_text(ZSH_COMPLETION)
+            print(f"Zsh completion installed: {ZSH_COMP_DIR / f'_{name}'}")
+            print("Reload with: exec zsh")
+        elif shell == "bash":
+            BASH_COMP_DIR.mkdir(parents=True, exist_ok=True)
+            (BASH_COMP_DIR / name).write_text(BASH_COMPLETION)
+            print(f"Bash completion installed: {BASH_COMP_DIR / name}")
+            print("Reload with: exec bash")
+        else:
+            print(f"Unknown shell: {shell}. Use '{name} completions bash' or '{name} completions zsh'")
+            return 1
+
+
+# ── _list_modules (internal) ───────────────────────────
+
+def cmd_list_modules(args):
+    config = load_config()
+    for name in config.get("modules", {}):
+        print(name)
+
+
+# ── menu ────────────────────────────────────────────────
+
+def cmd_menu(args=None):
+    """Interactive menu using fzf (if available) or simple numbered prompt."""
+    items = [
+        ("─── update ─────────────────────", None),
+        ("Update — check for updates",     lambda: cmd_update_check(None)),
+        ("Update — all modules",           lambda: cmd_update_run(argparse.Namespace(modules=[]))),
+        ("Update — Zen Browser",           lambda: cmd_update_run(argparse.Namespace(modules=["zen"]))),
+        ("Update — PortProtonQt",          lambda: cmd_update_run(argparse.Namespace(modules=["ppqt"]))),
+        ("Update — show status",           lambda: cmd_update_status(None)),
+        ("─── install ────────────────────", None),
+        ("Install — Zen Browser",          lambda: cmd_install(argparse.Namespace(packages=["zen"]))),
+        ("Install — PortProtonQt",         lambda: cmd_install(argparse.Namespace(packages=["ppqt"]))),
+        ("Install — NVIDIA Drivers",       lambda: cmd_install(argparse.Namespace(packages=["nvidia"]))),
+        ("Install — PipeWire (Void)",      lambda: cmd_install(argparse.Namespace(packages=["pipewire"]))),
+        ("─── fix ────────────────────────", None),
+        ("Fix — audio health check",       lambda: cmd_fix_health(None)),
+        ("─── clean ──────────────────────", None),
+        ("Clean — xbps-src builds",        lambda: cmd_clean(argparse.Namespace(targets=["builds"]))),
+        ("Clean — system cache",           lambda: cmd_clean(argparse.Namespace(targets=["cache"]))),
+    ]
+
+    fzf = subprocess.run(["which", "fzf"], capture_output=True, text=True).returncode == 0
+
+    while True:
+        if fzf:
+            labels = "\n".join(f"{l}" for l, a in items if a is not None)
+            sel = subprocess.run(
+                ["fzf", "--prompt=void-tool > ", "--height=~50%"],
+                input=labels, capture_output=True, text=True
+            )
+            if sel.returncode != 0:
+                break
+            choice = sel.stdout.strip()
+            for label, action in items:
+                if action is not None and label == choice:
+                    action()
+                    break
+        else:
+            print(f"\n  {bl('void-tool')} {yl(TAGLINE)}")
+            print(f"  {gr('─' * 40)}")
+            idx = 0
+            for label, action in items:
+                if action is None:
+                    print(f"  {bl(label)}")
+                else:
+                    idx += 1
+                    print(f"  {yl(str(idx)):>2}) {label}")
+            print(f"  0) {rd('Quit')}")
+            try:
+                c = input(f"\n  {yl('Choice')} [0-{idx}]: ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print()
+                break
+            if c == "0" or c == "":
+                break
+            try:
+                n = int(c)
+                real_idx = 0
+                for label, action in items:
+                    if action is not None:
+                        real_idx += 1
+                        if real_idx == n:
+                            action()
+                            break
+            except ValueError:
+                print(f"  {rd('Enter a number')}")
+
+        input(f"\n  {yl('Press Enter to continue')}...")
+    return 0
+
+
+# ── arg parser ──────────────────────────────────────────
+
+def make_parser():
+    p = argparse.ArgumentParser(
+        prog=TOOL_NAME,
+        description=f"void-tool — {TAGLINE}")
+    p.add_argument("--version", action="version", version=f"%(prog)s {TAGLINE}")
+
+    sub = p.add_subparsers(dest="command")
+
+    # install
+    pi = sub.add_parser("install", help="Install a package (zen, ppqt)")
+    pi.add_argument("packages", nargs="+", choices=["zen", "ppqt", "nvidia", "pipewire"],
+                    help="Package(s) to install")
+
+    # update
+    pu = sub.add_parser("update", help="Update modules or check status")
+    pu.add_argument("targets", nargs="*",
+                    help="check | status | <module>... (default: update all)")
+
+    # fix
+    pf = sub.add_parser("fix", help="Diagnose and fix system issues")
+    pf.add_argument("target", choices=["health"],
+                    help="What to fix")
+
+    # clean
+    pc = sub.add_parser("clean", help="Clean build artifacts")
+    pc.add_argument("targets", nargs="+", choices=["builds", "cache", "prefixes"],
+                    help="What to clean")
+
+    sub.add_parser("trigger", help="For Hyprland: check interval, then check+health")
+
+    pcomp = sub.add_parser("completions", help="Generate shell completion scripts")
+    pcomp.add_argument("shell", choices=["bash", "zsh", "install"],
+                       help="Shell to generate completions for (install = auto-detect)")
+
+    sub.add_parser("menu", help="Interactive TUI (arrow keys)")
+    sub.add_parser("_list_modules", help=argparse.SUPPRESS)
+
+    return p
+
+
+# ── dispatch ────────────────────────────────────────────
+
+def main():
+    parser = make_parser()
+    args = parser.parse_args()
+
+    if not args.command:
+        return cmd_menu()
+
+    dispatch = {
+        "install":       cmd_install,
+        "fix":           cmd_fix_health,
+        "clean":         cmd_clean,
+        "trigger":       cmd_trigger,
+        "completions":   cmd_completions,
+        "menu":          cmd_menu,
+        "_list_modules": cmd_list_modules,
+    }
+
+    # 'update' is special — sub-dispatch
+    if args.command == "update":
+        if not args.targets:
+            return cmd_update_run(argparse.Namespace(modules=[]))
+        first = args.targets[0]
+        if first == "check":
+            return cmd_update_check(None)
+        elif first == "status":
+            return cmd_update_status(None)
+        else:
+            return cmd_update_run(argparse.Namespace(modules=args.targets))
+
+    if args.command in dispatch:
+        return dispatch[args.command](args)
+
+    parser.print_help()
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

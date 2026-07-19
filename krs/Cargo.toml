@@ -1,0 +1,9 @@
+[package]
+name = "krs"
+version = "0.2.0"
+description = "rusty Swiss Army knife from the Void — health check"
+edition = "2021"
+
+[[bin]]
+name = "krs"
+path = "src/main.rs"
