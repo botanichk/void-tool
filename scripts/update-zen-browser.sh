@@ -118,10 +118,29 @@ cd "$VP"
 ./xbps-src update-sys 2>/dev/null || true
 cd - >/dev/null
 
-# --- build ---
-echo "🔨 Собираю пакет..."
-cd "$VP"
-if ! ./xbps-src pkg zen-browser; then
+# --- build (with retry on dep failure) ---
+build_ok=false
+for attempt in 1 2; do
+    echo "🔨 Собираю пакет (попытка $attempt)..."
+    cd "$VP"
+    if ./xbps-src pkg zen-browser; then
+        build_ok=true
+        break
+    fi
+    if [[ "$attempt" -eq 1 ]]; then
+        echo "🔄 Сборка не удалась — чищу мастердир и пробую заново..."
+        cd "$VP"
+        ./xbps-src clean 2>/dev/null || true
+        if ! ./xbps-src binary-bootstrap; then
+            echo "❌ binary-bootstrap не удался"
+            mv "$TEMPLATE.bak" "$TEMPLATE"
+            exit 1
+        fi
+        cd - >/dev/null
+    fi
+done
+
+if ! $build_ok; then
     echo "❌ Сборка не удалась, откатываю шаблон..."
     mv "$TEMPLATE.bak" "$TEMPLATE"
     exit 1
