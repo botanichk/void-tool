@@ -430,7 +430,7 @@ _void-tool_completions() {
         COMPREPLY=($(compgen -W "install update fix clean trigger completions menu self-install setup" -- "$cur"))
     elif [[ $COMP_CWORD -eq 2 ]]; then
         case "$prev" in
-            install) COMPREPLY=($(compgen -W "zen ppqt nvidia nvidia-32bit pipewire" -- "$cur")) ;;
+            install) COMPREPLY=($(compgen -W "zen ppqt nvidia nvidia-32bit pipewire void-tool" -- "$cur")) ;;
             update)  COMPREPLY=($(compgen -W "check status $(void-tool _list_modules 2>/dev/null)" -- "$cur")) ;;
             fix)     COMPREPLY=($(compgen -W "health" -- "$cur")) ;;
             clean)   COMPREPLY=($(compgen -W "builds cache prefixes" -- "$cur")) ;;
@@ -457,7 +457,7 @@ _void-tool() {
             ;;
         args)
             case $words[2] in
-                install) _values 'package' zen ppqt nvidia nvidia-32bit pipewire ;;
+                install) _values 'package' zen ppqt nvidia nvidia-32bit pipewire void-tool ;;
                 update)  _values 'action' check status $(void-tool _list_modules 2>/dev/null) ;;
                 fix)     _values 'target' health ;;
                 setup)   _values 'action' all ;;
@@ -717,6 +717,8 @@ def cmd_menu(args=None):
         ("Fix — audio health check",       lambda: cmd_fix_health(None)),
         ("─── setup ──────────────────────", None),
         ("Setup — build environment",      lambda: cmd_setup(None)),
+        ("─── update (void-tool) ──────────", None),
+        ("Update — void-tool itself",      lambda: cmd_update_run(argparse.Namespace(modules=["void-tool"]))),
         ("─── clean ──────────────────────", None),
         ("Clean — xbps-src builds",        lambda: cmd_clean(argparse.Namespace(targets=["builds"]))),
         ("Clean — system cache",           lambda: cmd_clean(argparse.Namespace(targets=["cache"]))),
@@ -784,8 +786,8 @@ def make_parser():
 
     # install
     pi = sub.add_parser("install", help="Install a package (zen, ppqt, nvidia, nvidia-32bit, pipewire)")
-    pi.add_argument("packages", nargs="+", choices=["zen", "ppqt", "nvidia", "pipewire"],
-                    help="Package(s) to install — zen, ppqt, nvidia, nvidia-32bit, pipewire")
+    pi.add_argument("packages", nargs="+", choices=["zen", "ppqt", "nvidia", "nvidia-32bit", "pipewire", "void-tool"],
+                    help="Package(s) to install — zen, ppqt, nvidia, nvidia-32bit, pipewire, void-tool")
 
     # update
     pu = sub.add_parser("update", help="Update modules or check status")

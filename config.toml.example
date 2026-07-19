@@ -19,3 +19,7 @@ script = "install-pipewire.sh"
 [modules.nvidia-32bit]
 enabled = true
 script = "install-nvidia-32bit.sh"
+
+[modules.void-tool]
+enabled = true
+script = "update-void-tool.sh"
