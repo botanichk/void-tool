@@ -98,6 +98,12 @@ if [[ ! -d "$VP/masterdir" ]]; then
     cd - >/dev/null
 fi
 
+# --- sync masterdir with repos ---
+echo "🔄 Синхронизирую masterdir с репозиториями..."
+cd "$VP"
+./xbps-src update-sys 2>/dev/null || true
+cd - >/dev/null
+
 # --- build ---
 echo "🔨 Собираю пакет..."
 cd "$VP"
