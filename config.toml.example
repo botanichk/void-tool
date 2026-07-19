@@ -1,0 +1,21 @@
+interval_days = 7
+
+[modules.zen]
+enabled = true
+script = "update-zen-browser.sh"
+
+[modules.ppqt]
+enabled = true
+script = "update-portprotonqt.sh"
+
+[modules.nvidia]
+enabled = true
+script = "install-nvidia.sh"
+
+[modules.pipewire]
+enabled = true
+script = "install-pipewire.sh"
+
+[modules.nvidia-32bit]
+enabled = true
+script = "install-nvidia-32bit.sh"

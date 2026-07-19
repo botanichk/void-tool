@@ -430,7 +430,7 @@ _void-tool_completions() {
         COMPREPLY=($(compgen -W "install update fix clean trigger completions menu self-install" -- "$cur"))
     elif [[ $COMP_CWORD -eq 2 ]]; then
         case "$prev" in
-            install) COMPREPLY=($(compgen -W "zen ppqt nvidia pipewire" -- "$cur")) ;;
+            install) COMPREPLY=($(compgen -W "zen ppqt nvidia nvidia-32bit pipewire" -- "$cur")) ;;
             update)  COMPREPLY=($(compgen -W "check status $(void-tool _list_modules 2>/dev/null)" -- "$cur")) ;;
             fix)     COMPREPLY=($(compgen -W "health" -- "$cur")) ;;
             clean)   COMPREPLY=($(compgen -W "builds cache prefixes" -- "$cur")) ;;
@@ -457,7 +457,7 @@ _void-tool() {
             ;;
         args)
             case $words[2] in
-                install) _values 'package' zen ppqt nvidia pipewire ;;
+                install) _values 'package' zen ppqt nvidia nvidia-32bit pipewire ;;
                 update)  _values 'action' check status $(void-tool _list_modules 2>/dev/null) ;;
                 fix)     _values 'target' health ;;
                 clean)   _values 'target' builds cache prefixes ;;
@@ -591,6 +591,7 @@ def cmd_menu(args=None):
         ("Install — PortProtonQt",         lambda: cmd_install(argparse.Namespace(packages=["ppqt"]))),
         ("Install — NVIDIA Drivers",       lambda: cmd_install(argparse.Namespace(packages=["nvidia"]))),
         ("Install — PipeWire (Void)",      lambda: cmd_install(argparse.Namespace(packages=["pipewire"]))),
+        ("Install — NVIDIA 32-bit libs",   lambda: cmd_install(argparse.Namespace(packages=["nvidia-32bit"]))),
         ("─── fix ────────────────────────", None),
         ("Fix — audio health check",       lambda: cmd_fix_health(None)),
         ("─── clean ──────────────────────", None),
@@ -659,9 +660,9 @@ def make_parser():
     sub = p.add_subparsers(dest="command")
 
     # install
-    pi = sub.add_parser("install", help="Install a package (zen, ppqt, nvidia, pipewire)")
+    pi = sub.add_parser("install", help="Install a package (zen, ppqt, nvidia, nvidia-32bit, pipewire)")
     pi.add_argument("packages", nargs="+", choices=["zen", "ppqt", "nvidia", "pipewire"],
-                    help="Package(s) to install")
+                    help="Package(s) to install — zen, ppqt, nvidia, nvidia-32bit, pipewire")
 
     # update
     pu = sub.add_parser("update", help="Update modules or check status")
