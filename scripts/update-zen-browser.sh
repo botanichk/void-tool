@@ -89,6 +89,12 @@ sed -i "/^checksum=/ s/[a-f0-9]\{64\}/$new_checksum/" "$TEMPLATE"
 echo "📝 Шаблон обновлён: $current_ver → $latest_ver"
 
 # --- bootstrap void-packages if needed ---
+# ensure git is available
+if ! command -v git &>/dev/null; then
+    echo "📥 Устанавливаю git..."
+    sudo xbps-install -Sy git
+fi
+
 VP="$REAL_HOME/void-packages"
 if [[ ! -d "$VP" ]]; then
     echo "📥 Клонирую void-packages..."
