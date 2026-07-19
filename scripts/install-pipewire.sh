@@ -41,7 +41,7 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 # Определяем реального пользователя (через sudo)
-REAL_USER="${SUDO_USER:-ig_ro}"
+REAL_USER="${SUDO_USER:-$(logname 2>/dev/null || whoami)}"
 REAL_HOME="$(getent passwd "$REAL_USER" | cut -d: -f6)"
 
 log "=== void-tool PipeWire installer ==="
@@ -145,9 +145,13 @@ for i in $(seq 1 10); do
     sleep 1
 done
 
-pactl set-default-sink alsa_output.pci-0000_01_00.1.hdmi-stereo 2>/dev/null
-pactl set-sink-volume alsa_output.pci-0000_01_00.1.hdmi-stereo 100% 2>/dev/null
-pactl set-sink-mute alsa_output.pci-0000_01_00.1.hdmi-stereo 0 2>/dev/null
+# set first real sink as default
+sink=$(pactl list short sinks 2>/dev/null | grep -v auto_null | head -1 | awk '{print $2}')
+if [ -n "$sink" ]; then
+    pactl set-default-sink "$sink" 2>/dev/null
+    pactl set-sink-volume "$sink" 100% 2>/dev/null
+    pactl set-sink-mute "$sink" 0 2>/dev/null
+fi
 XEOF
 chmod +x "$START_SCRIPT"
 

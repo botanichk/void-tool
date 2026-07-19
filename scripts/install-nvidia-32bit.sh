@@ -38,7 +38,13 @@ if xbps-install -Sy nvidia-libs-32bit 2>/dev/null; then
     log "nvidia-libs-32bit installed from main repo"
 else
     log "Main repo failed — trying local build from ~/void-packages..."
-    REPO_DIR="/home/ig_ro/void-packages"
+    if [[ -n "${SUDO_USER:-}" ]]; then
+        REAL_HOME="$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6)"
+    else
+        REAL_HOME="$HOME"
+    fi
+    : "${REAL_HOME:=$HOME}"
+    REPO_DIR="$REAL_HOME/void-packages"
     if [ -d "$REPO_DIR/hostdir/binpkgs/multilib/nonfree" ]; then
         xbps-install -Sy --repository="$REPO_DIR/hostdir/binpkgs/multilib/nonfree" nvidia-libs-32bit
     else

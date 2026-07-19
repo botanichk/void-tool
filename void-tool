@@ -25,6 +25,22 @@ script = "update-zen-browser.sh"
 [modules.ppqt]
 enabled = true
 script = "update-portprotonqt.sh"
+
+[modules.nvidia]
+enabled = true
+script = "install-nvidia.sh"
+
+[modules.nvidia-32bit]
+enabled = true
+script = "install-nvidia-32bit.sh"
+
+[modules.pipewire]
+enabled = true
+script = "install-pipewire.sh"
+
+[modules.void-tool]
+enabled = true
+script = "update-void-tool.sh"
 """
 
 TOOL_NAME = "void-tool"
@@ -243,12 +259,14 @@ def cmd_fix_health(args):
                 return True
         return False
 
-    def _has_real_sinks():
+    def _get_default_sink():
         r = subprocess.run(["pactl", "list", "short", "sinks"],
                            capture_output=True, text=True, timeout=5)
-        sinks = [l for l in r.stdout.split("\n") if l.strip()]
-        real = [s for s in sinks if "auto_null" not in s]
-        return len(real) > 0
+        for line in r.stdout.split("\n"):
+            parts = line.strip().split()
+            if len(parts) >= 2 and "auto_null" not in line:
+                return parts[1]
+        return None
 
     def _wp_is_stuck():
         if not WP_LOG.exists():
@@ -299,20 +317,21 @@ def cmd_fix_health(args):
             else:
                 return False
 
-        if not _has_real_sinks():
+        sink = _get_default_sink()
+        if not sink:
             print(f"  {yl('⚠')} Pulse OK but no real sinks — waiting...")
             if not _wait_for_pulse(timeout=10):
                 return False
+            sink = _get_default_sink()
+            if not sink:
+                return False
 
-        subprocess.run(
-            ["pactl", "set-default-sink", "alsa_output.pci-0000_01_00.1.hdmi-stereo"],
-            capture_output=True, timeout=5)
-        subprocess.run(
-            ["pactl", "set-sink-volume", "alsa_output.pci-0000_01_00.1.hdmi-stereo", "100%"],
-            capture_output=True, timeout=5)
-        subprocess.run(
-            ["pactl", "set-sink-mute", "alsa_output.pci-0000_01_00.1.hdmi-stereo", "0"],
-            capture_output=True, timeout=5)
+        subprocess.run(["pactl", "set-default-sink", sink],
+                       capture_output=True, timeout=5)
+        subprocess.run(["pactl", "set-sink-volume", sink, "100%"],
+                       capture_output=True, timeout=5)
+        subprocess.run(["pactl", "set-sink-mute", sink, "0"],
+                       capture_output=True, timeout=5)
         return True
 
     statuses = {
@@ -324,7 +343,7 @@ def cmd_fix_health(args):
     r = subprocess.run(["timeout", "3", "pactl", "info"], capture_output=True, timeout=5)
     statuses["pulse-socket"] = r.returncode == 0
 
-    if all(statuses.values()) and _has_real_sinks():
+    if all(statuses.values()) and _get_default_sink():
         print(f"  {gr('✓')} PipeWire stack healthy")
         return 0
 

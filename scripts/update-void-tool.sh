@@ -18,8 +18,8 @@ if $CHECK_MODE; then
     git fetch origin main 2>/dev/null || { echo "void-tool: ?"; exit 1; }
     behind=$(git rev-list --count HEAD..origin/main 2>/dev/null || echo "0")
     if [[ "$behind" -gt 0 ]]; then
-        local_ver=$(grep "^VERSION" "$REPO_DIR/void-tool" | head -1 | awk -F'"' '{print $2}' || echo "?")
-        echo "void-tool: $local_ver → update available ($behind commits behind)"
+        current_ver=$(grep "^VERSION" "$REPO_DIR/void-tool" | head -1 | awk -F'"' '{print $2}' || echo "?")
+        echo "void-tool: $current_ver → update available ($behind commits behind)"
         exit 1
     fi
     echo "void-tool: up-to-date"

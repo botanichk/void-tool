@@ -91,7 +91,7 @@ fn cmd_health() {
     ];
 
     let pulse_ok = check_pulse_socket();
-    let has_sinks = has_real_sinks();
+    let has_sinks = get_default_sink().is_some();
 
     let all_running = ps.iter().all(|(_, ok)| *ok) && pulse_ok;
 
@@ -124,16 +124,24 @@ fn cmd_health() {
     }
 }
 
-fn has_real_sinks() -> bool {
+fn get_default_sink() -> Option<String> {
     let out = Command::new("pactl")
         .args(["list", "short", "sinks"])
         .output();
     match out {
         Ok(o) => {
             let text = String::from_utf8_lossy(&o.stdout);
-            text.lines().any(|l| !l.contains("auto_null"))
+            for line in text.lines() {
+                if !line.contains("auto_null") {
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if parts.len() >= 2 {
+                        return Some(parts[1].to_string());
+                    }
+                }
+            }
+            None
         }
-        Err(_) => false,
+        Err(_) => None,
     }
 }
 
@@ -190,7 +198,7 @@ fn restart_stack() -> bool {
     let start = Instant::now();
     let timeout = Duration::from_secs(10);
     loop {
-        if has_real_sinks() {
+        if get_default_sink().is_some() {
             break;
         }
         if start.elapsed() > timeout {
@@ -200,17 +208,18 @@ fn restart_stack() -> bool {
         std::thread::sleep(Duration::from_secs(1));
     }
 
-    // set HDMI default
-    let sink = "alsa_output.pci-0000_01_00.1.hdmi-stereo";
-    let _ = Command::new("pactl")
-        .args(["set-default-sink", sink])
-        .status();
-    let _ = Command::new("pactl")
-        .args(["set-sink-volume", sink, "100%"])
-        .status();
-    let _ = Command::new("pactl")
-        .args(["set-sink-mute", sink, "0"])
-        .status();
+    // set first real sink as default
+    if let Some(ref sink) = get_default_sink() {
+        let _ = Command::new("pactl")
+            .args(["set-default-sink", sink])
+            .status();
+        let _ = Command::new("pactl")
+            .args(["set-sink-volume", sink, "100%"])
+            .status();
+        let _ = Command::new("pactl")
+            .args(["set-sink-mute", sink, "0"])
+            .status();
+    }
 
     true
 }
