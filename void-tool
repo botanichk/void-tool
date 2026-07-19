@@ -47,7 +47,7 @@ def load_config():
         return tomllib.load(f)
 
 
-def run_script(script_name, extra_args=None):
+def run_script(script_name, extra_args=None, live=False):
     script_path = SCRIPTS_DIR / script_name
     if not script_path.exists():
         return {"rc": -1, "out": "", "err": f"Script not found: {script_path}"}
@@ -57,8 +57,12 @@ def run_script(script_name, extra_args=None):
         cmd.extend(extra_args)
 
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-        return {"rc": r.returncode, "out": r.stdout, "err": r.stderr}
+        if live:
+            r = subprocess.run(cmd, timeout=3600)
+            return {"rc": r.returncode, "out": "", "err": ""}
+        else:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+            return {"rc": r.returncode, "out": r.stdout, "err": r.stderr}
     except subprocess.TimeoutExpired:
         return {"rc": -1, "out": "", "err": "Timeout (600s)"}
     except Exception as e:
@@ -150,19 +154,12 @@ def cmd_update_run(args):
             continue
 
         print(f"\n{bl('⟳')} Updating {bd(name)}...")
-        result = run_script(modules[name]["script"])
-
-        for line in result["out"].split("\n"):
-            if line.strip():
-                print(f"  {line}")
+        result = run_script(modules[name]["script"], live=True)
 
         if result["rc"] == 0:
             print(gr(f"✓ {name} updated successfully"))
         else:
             print(rd(f"✗ {name} update failed (exit {result['rc']})"))
-            for line in result["err"].split("\n"):
-                if line.strip():
-                    print(f"  {rd(line)}")
 
 
 # ── install ─────────────────────────────────────────────
@@ -180,19 +177,12 @@ def cmd_install(args):
             continue
 
         print(f"\n{bl('⟳')} Installing {bd(name)}...")
-        result = run_script(modules[name]["script"], ["--install"])
-
-        for line in result["out"].split("\n"):
-            if line.strip():
-                print(f"  {line}")
+        result = run_script(modules[name]["script"], ["--install"], live=True)
 
         if result["rc"] == 0:
             print(gr(f"✓ {name} installed"))
         else:
             print(rd(f"✗ {name} install failed (exit {result['rc']})"))
-            for line in result["err"].split("\n"):
-                if line.strip():
-                    print(f"  {rd(line)}")
 
 
 # ── fix ─────────────────────────────────────────────────
