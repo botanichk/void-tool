@@ -1,7 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-TEMPLATE="$HOME/void-packages/srcpkgs/portprotonqt/template"
+# determine real user home (works under sudo, su, or direct login)
+if [[ -n "${SUDO_USER:-}" ]]; then
+    REAL_HOME="$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6)"
+else
+    REAL_HOME="$HOME"
+fi
+: "${REAL_HOME:=$HOME}"
+
+TEMPLATE="$REAL_HOME/void-packages/srcpkgs/portprotonqt/template"
 GITLAB_HOST="git.linux-gaming.ru"
 GITLAB_PROJECT="Linux-Gaming%2FPortProtonQt"
 
@@ -14,7 +22,7 @@ INSTALL_MODE=false
 if [[ ! -f "$TEMPLATE" ]]; then
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     for src in "$SCRIPT_DIR/templates/portprotonqt/template" \
-               "$HOME/void-tool/templates/portprotonqt/template"; do
+               "$REAL_HOME/void-tool/templates/portprotonqt/template"; do
         if [[ -f "$src" ]]; then
             echo "📋 Copying template from $src"
             mkdir -p "$(dirname "$TEMPLATE")"
@@ -81,7 +89,7 @@ sed -i "/^checksum=/ s/[a-f0-9]\{64\}/$new_checksum/" "$TEMPLATE"
 echo "📝 Шаблон обновлён: $current_ver → $latest_ver (revision=1)"
 
 # --- bootstrap void-packages if needed ---
-VP="$HOME/void-packages"
+VP="$REAL_HOME/void-packages"
 if [[ ! -d "$VP" ]]; then
     echo "📥 Клонирую void-packages..."
     git clone https://github.com/void-linux/void-packages.git "$VP"
@@ -118,10 +126,10 @@ echo "📦 Устанавливаю..."
 if command -v xi &>/dev/null; then
     sudo xi -y portprotonqt
 elif command -v xbps-install &>/dev/null; then
-    sudo xbps-install -y --repository="$HOME/void-packages/hostdir/binpkgs" portprotonqt
+    sudo xbps-install -y --repository="$REAL_HOME/void-packages/hostdir/binpkgs" portprotonqt
 else
     echo "⚠️  xbps-install не найден, установи вручную:"
-    echo "   sudo xbps-install -y --repository=$HOME/void-packages/hostdir/binpkgs portprotonqt"
+    echo "   sudo xbps-install -y --repository=$REAL_HOME/void-packages/hostdir/binpkgs portprotonqt"
 fi
 
 rm -f "$TEMPLATE.bak"

@@ -1,18 +1,26 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# determine real user home (works under sudo, su, or direct login)
+if [[ -n "${SUDO_USER:-}" ]]; then
+    REAL_HOME="$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6)"
+else
+    REAL_HOME="$HOME"
+fi
+: "${REAL_HOME:=$HOME}"
+
 CHECK_MODE=false
 INSTALL_MODE=false
 [[ "${1:-}" == "--check" ]] && CHECK_MODE=true
 [[ "${1:-}" == "--install" ]] && INSTALL_MODE=true
 
-TEMPLATE="$HOME/void-packages/srcpkgs/zen-browser/template"
+TEMPLATE="$REAL_HOME/void-packages/srcpkgs/zen-browser/template"
 
 # bootstrap template from void-tool if missing
 if [[ ! -f "$TEMPLATE" ]]; then
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     for src in "$SCRIPT_DIR/templates/zen-browser/template" \
-               "$HOME/void-tool/templates/zen-browser/template"; do
+               "$REAL_HOME/void-tool/templates/zen-browser/template"; do
         if [[ -f "$src" ]]; then
             echo "📋 Copying template from $src"
             mkdir -p "$(dirname "$TEMPLATE")"
@@ -81,7 +89,7 @@ sed -i "/^checksum=/ s/[a-f0-9]\{64\}/$new_checksum/" "$TEMPLATE"
 echo "📝 Шаблон обновлён: $current_ver → $latest_ver"
 
 # --- bootstrap void-packages if needed ---
-VP="$HOME/void-packages"
+VP="$REAL_HOME/void-packages"
 if [[ ! -d "$VP" ]]; then
     echo "📥 Клонирую void-packages..."
     git clone https://github.com/void-linux/void-packages.git "$VP"
@@ -118,10 +126,10 @@ echo "📦 Устанавливаю..."
 if command -v xi &>/dev/null; then
     sudo xi -y zen-browser
 elif command -v xbps-install &>/dev/null; then
-    sudo xbps-install -y --repository="$HOME/void-packages/hostdir/binpkgs" zen-browser
+    sudo xbps-install -y --repository="$REAL_HOME/void-packages/hostdir/binpkgs" zen-browser
 else
     echo "⚠️  xbps-install не найден, установи вручную:"
-    echo "   sudo xbps-install -y --repository=$HOME/void-packages/hostdir/binpkgs zen-browser"
+    echo "   sudo xbps-install -y --repository=$REAL_HOME/void-packages/hostdir/binpkgs zen-browser"
 fi
 
 rm -f "$TEMPLATE.bak"
