@@ -112,12 +112,20 @@ if [[ ! -d "$VP/masterdir" ]]; then
     cd - >/dev/null
 fi
 
-# --- sync masterdir with repos ---
-echo "🔄 Синхронизирую masterdir с репозиториями..."
+# --- sync void-packages + masterdir with repos ---
+echo "🔄 Обновляю void-packages и синхронизирую masterdir..."
 cd "$VP"
-./xbps-src update-sys 2>/dev/null || true
-# fix ncurses split conflict if present
-sudo xbps-install -Sy -r "$VP/masterdir" ncurses-libs 2>/dev/null || true
+git fetch --quiet origin master || true
+git reset --hard origin/master || true
+if ! ./xbps-src update-sys 2>/dev/null; then
+    echo "⚠️  update-sys предупредил об ошибке, продолжаю..."
+fi
+# full upgrade of masterdir (fix stale deps like ncurses split)
+if ! sudo xbps-install -Suy -r "$VP/masterdir" 2>/dev/null; then
+    echo "❌ Не удалось синхронизировать masterdir с репозиториями"
+    mv "$TEMPLATE.bak" "$TEMPLATE" 2>/dev/null || true
+    exit 1
+fi
 cd - >/dev/null
 
 # --- build (with retry on dep failure) ---
@@ -130,9 +138,11 @@ for attempt in 1 2; do
         break
     fi
     if [[ "$attempt" -eq 1 ]]; then
-        echo "🔄 Сборка не удалась — чищу мастердир и пробую заново..."
+        echo "🔄 Сборка не удалась — чищу мастердир + обновляю void-packages, пробую заново..."
         cd "$VP"
         ./xbps-src clean 2>/dev/null || true
+        git fetch --quiet origin master || true
+        git reset --hard origin/master || true
         if ! ./xbps-src binary-bootstrap; then
             echo "❌ binary-bootstrap не удался"
             mv "$TEMPLATE.bak" "$TEMPLATE"
