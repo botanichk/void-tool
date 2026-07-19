@@ -116,6 +116,8 @@ fi
 echo "🔄 Синхронизирую masterdir с репозиториями..."
 cd "$VP"
 ./xbps-src update-sys 2>/dev/null || true
+# fix ncurses split conflict if present
+sudo xbps-install -Sy -r "$VP/masterdir" ncurses-libs 2>/dev/null || true
 cd - >/dev/null
 
 # --- build (with retry on dep failure) ---
