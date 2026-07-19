@@ -2,12 +2,32 @@
 set -euo pipefail
 
 CHECK_MODE=false
+INSTALL_MODE=false
 [[ "${1:-}" == "--check" ]] && CHECK_MODE=true
+[[ "${1:-}" == "--install" ]] && INSTALL_MODE=true
 
 TEMPLATE="$HOME/void-packages/srcpkgs/zen-browser/template"
 
+# bootstrap template from void-tool if missing
+if [[ ! -f "$TEMPLATE" ]]; then
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    for src in "$SCRIPT_DIR/templates/zen-browser/template" \
+               "$HOME/void-tool/templates/zen-browser/template"; do
+        if [[ -f "$src" ]]; then
+            echo "📋 Copying template from $src"
+            mkdir -p "$(dirname "$TEMPLATE")"
+            cp "$src" "$TEMPLATE"
+            break
+        fi
+    done
+fi
+
 if [[ ! -f "$TEMPLATE" ]]; then
     echo "❌ Template not found: $TEMPLATE"
+    echo "   Clone void-packages first:"
+    echo "     git clone https://github.com/void-linux/void-packages.git ~/void-packages"
+    echo "     cd ~/void-packages && ./xbps-src binary-bootstrap"
+    echo "   Then rerun this command."
     exit 1
 fi
 
@@ -29,8 +49,12 @@ latest_ver=${latest_tag#v}
 echo "🏷️  Последний релиз: $latest_ver"
 
 if [[ "$current_ver" == "$latest_ver" ]]; then
-    echo "✅ Версии совпадают, обновление не требуется."
-    exit 0
+    if $INSTALL_MODE; then
+        echo "✅ версии совпадают ($current_ver), собираю..."
+    else
+        echo "✅ Версии совпадают, обновление не требуется."
+        exit 0
+    fi
 fi
 
 echo "⬆️  zen-browser: $current_ver → $latest_ver"

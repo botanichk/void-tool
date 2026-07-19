@@ -1,0 +1,34 @@
+pkgname=zen-browser
+version=1.21.8b
+revision=2
+archs="x86_64"
+hostmakedepends="tar xz"
+short_desc="Performance oriented Firefox-based web browser"
+maintainer="ig_ro"
+license="MPL-2.0"
+homepage="https://github.com/zen-browser/desktop"
+distfiles="https://github.com/zen-browser/desktop/releases/download/${version}/zen.linux-x86_64.tar.xz
+ https://ftp.mozilla.org/pub/firefox/releases/152.0.5/linux-x86_64/xpi/ru.xpi"
+checksum="05a36657e4c9dbe700e54a2e3941f7af4656abbe330690aa74d8cf793af396f4
+ 5c84d664ae422410f149feabf2ce974e5c6e2003a90c06403e730f3c9960a547"
+skip_extraction="ru.xpi"
+
+do_install() {
+    install -dm755 "${DESTDIR}/opt/zen-browser" "${DESTDIR}/opt/zen-browser/distribution" "${DESTDIR}/opt/zen-browser/distribution/extensions" "${DESTDIR}/usr/bin" "${DESTDIR}/usr/share/applications" "${DESTDIR}/usr/share/pixmaps"
+
+    tar -xvf ${XBPS_SRCDISTDIR}/${pkgname}-${version}/zen.linux-x86_64.tar.xz -C ${DESTDIR}/opt/$pkgname --strip-components=1
+
+    ln -sf /opt/zen-browser/zen ${DESTDIR}/usr/bin/zen
+
+    for size in 16 32 48 64 128; do
+        vinstall "${DESTDIR}/opt/zen-browser/browser/chrome/icons/default/default${size}.png" 644 "usr/share/pixmaps/zen_${size}.png"
+    done
+
+    vinstall "${FILESDIR}/zen.desktop" 644 usr/share/applications
+
+    ln -sf /usr/lib/libnssckbi.so ${DESTDIR}/opt/$pkgname/libnssckbi.so
+
+    vinstall ${FILESDIR}/policies.json 644 opt/$pkgname/distribution/
+
+    cp "${XBPS_SRCDISTDIR}/${pkgname}-${version}/ru.xpi" "${DESTDIR}/opt/$pkgname/distribution/extensions/langpack-ru@firefox.mozilla.org.xpi"
+}

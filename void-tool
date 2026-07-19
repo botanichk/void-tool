@@ -535,6 +535,15 @@ def cmd_self_install(args):
             (user_scripts / f.name).chmod(0o755)
             print(f"  ✓ {f.name} → {user_scripts}")
 
+        # copy templates next to scripts
+        templates_src = repo_dir / "templates"
+        if templates_src.exists():
+            user_templates = user_scripts / "templates"
+            if user_templates.exists():
+                shutil.rmtree(str(user_templates))
+            shutil.copytree(str(templates_src), str(user_templates))
+            print(f"  ✓ templates → {user_templates}")
+
     # 3. build and install krs
     krs_bin = bin_dir / "krs"
     if krs_src.exists():

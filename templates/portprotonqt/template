@@ -1,0 +1,45 @@
+# Template file for 'portprotonqt'
+pkgname=portprotonqt
+version=1.3.1
+revision=1
+build_style=meson
+hostmakedepends="pkg-config python3 gettext"
+makedepends="vulkan-loader-devel python3-devel"
+depends="python3-pyside6
+ python3-pyside6-gui
+ python3-pyside6-network
+ python3-pyside6-svg
+ python3-pyside6-widgets
+ python3-Babel
+ python3-evdev
+ python3-libarchive-c
+ python3-orjson
+ python3-Pillow
+ python3-psutil
+ python3-rapidfuzz
+ python3-qrcode
+ python3-requests
+ python3-tqdm
+ python3-vdf
+ python3-websocket-client
+ python3-dbus-fast
+ python3-pefile
+ python3-pygame
+ vulkan-loader
+  xz
+  zstd
+  unzip
+  cabextract
+  icoutils
+  curl
+  bubblewrap"
+short_desc="Modern GUI for managing and launching games from PortProton and Steam"
+maintainer="ig_ro <ig_ro@icloud.com>"
+license="GPL-3.0-only"
+homepage="https://git.linux-gaming.ru/Linux-Gaming/PortProtonQt"
+distfiles="https://git.linux-gaming.ru/Linux-Gaming/PortProtonQt/archive/v${version}.tar.gz"
+checksum=d8b1111e58574409187a2165f6fc1ba81e8a82cb6dda06410aeea108e945de4d
+
+post_install() {
+	vlicense LICENSE
+}
