@@ -591,20 +591,38 @@ def cmd_setup(args):
     """Prepare system for xbps-src builds (void-packages + bootstrap + deps)."""
     print(f"  {bl('⟳')} Проверяю окружение для сборок...\n")
 
+    has_sudo = subprocess.run(["sudo", "-n", "true"], capture_output=True).returncode == 0
+    if not has_sudo:
+        print(f"  {yl('ℹ')} Для установки пакетов (git, base-devel) нужен sudo без пароля.")
+        print(f"     Запусти: sudo void-tool setup")
+        print()
+
     ok = True
+
+    def sudo_run(cmd, desc, timeout=300):
+        nonlocal ok
+        if not has_sudo:
+            print(f"  ✗ {desc}: {rd('нужен sudo')}")
+            ok = False
+            return False
+        print(f"  {yl('⟳')} {desc}...", end=" ", flush=True)
+        r = subprocess.run(["sudo"] + cmd, capture_output=True, text=True, timeout=timeout)
+        if r.returncode == 0:
+            print(gr("done"))
+            return True
+        else:
+            print(rd("failed"))
+            for line in r.stderr.strip().split("\n")[-3:]:
+                if line.strip():
+                    print(f"    {line}")
+            ok = False
+            return False
 
     # 1. git
     if shutil.which("git"):
         print(f"  ✓ git: {gr('installed')}")
     else:
-        print(f"  {yl('⟳')} git: устанавливаю...")
-        r = subprocess.run(["sudo", "xbps-install", "-Sy", "git"],
-                           capture_output=True, text=True, timeout=120)
-        if r.returncode == 0:
-            print(f"  ✓ git: {gr('installed')}")
-        else:
-            print(f"  ✗ git: {rd('failed to install')}")
-            ok = False
+        sudo_run(["xbps-install", "-Sy", "git"], "git: устанавливаю")
 
     # 2. void-packages
     vp = Path.home() / "void-packages"
@@ -627,7 +645,7 @@ def cmd_setup(args):
     if masterdir.exists():
         print(f"  ✓ masterdir: {gr('bootstrapped')}")
     else:
-        print(f"  {yl('⟳')} Выполняю binary-bootstrap (это может занять время)...")
+        print(f"  {yl('⟳')} binary-bootstrap (это может занять время)...")
         r = subprocess.run(
             ["./xbps-src", "binary-bootstrap"],
             cwd=str(vp), capture_output=True, text=True, timeout=600)
@@ -636,41 +654,33 @@ def cmd_setup(args):
         else:
             err = r.stderr.strip()
             if "chown" in err.lower() and "Invalid argument" in err:
-                print(f"  ✗ masterdir: {rd('bootstrap failed — проблема с файловой системой')}")
-                print(f"    chown не работает на этой ФС. Убедись, что {vp} на ext4/btrfs.")
+                print(f"  ✗ masterdir: {rd('ошибка ФС — chown не работает')}")
+                print(f"    Убедись, что {vp} на ext4/btrfs")
             else:
                 print(f"  ✗ masterdir: {rd('bootstrap failed')}")
                 print(f"    {err[:300]}")
-            # Проверяем user namespaces
             un = subprocess.run(["cat", "/proc/sys/kernel/unprivileged_userns_clone"],
                                capture_output=True, text=True, timeout=5)
             if un.stdout.strip() == "0":
-                print(f"  {yl('ℹ')} unprivileged_userns_clone=0 — включи:")
+                print(f"  {yl('ℹ')} Включи user namespaces:")
                 print(f"     sudo sysctl kernel.unprivileged_userns_clone=1")
             ok = False
 
-    # 4. base-devel (часто нужен для сборок)
-    if subprocess.run(["xbps-query", "base-devel"], capture_output=True).returncode == 0:
+    # 4. base-devel
+    if subprocess.run(["xbps-query", "base-devel"],
+                      capture_output=True).returncode == 0:
         print(f"  ✓ base-devel: {gr('installed')}")
     else:
-        print(f"  {yl('⟳')} base-devel: устанавливаю...")
-        r = subprocess.run(["sudo", "xbps-install", "-Sy", "base-devel"],
-                           capture_output=True, text=True, timeout=300)
-        if r.returncode == 0:
-            print(f"  ✓ base-devel: {gr('installed')}")
-        else:
-            print(f"  ✗ base-devel: {rd('failed')}")
-            ok = False
+        sudo_run(["xbps-install", "-Sy", "base-devel"], "base-devel: устанавливаю")
 
-    # 5. templates from void-tool
+    # 5. templates
     scripts_tpl = Path.home() / "scripts" / "templates"
     if scripts_tpl.exists():
         print(f"  ✓ templates: {gr('found')}")
     else:
-        # try to find them in void-tool repo
         for src in [Path.home() / "void-tool" / "templates"]:
             if src.exists():
-                shutil.copytree(str(src), str(scripts_tpl))
+                shutil.copytree(str(src), str(scripts_tpl), dirs_exist_ok=True)
                 print(f"  ✓ templates: {gr('copied')}")
                 break
         if not scripts_tpl.exists():
@@ -679,6 +689,7 @@ def cmd_setup(args):
     print()
     if ok:
         print(f"  {gr('✓')} Окружение готово к сборкам!")
+        print(f"     Теперь: sudo void-tool install ppqt")
     else:
         print(f"  {rd('✗')} Были ошибки — проверь выше")
         return 1
