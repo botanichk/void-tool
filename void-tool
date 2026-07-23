@@ -74,14 +74,15 @@ def run_script(script_name, extra_args=None, live=False):
 
     try:
         safe_cwd = str(Path.home())
+        timeout = 3600 if live else 600
         if live:
-            r = subprocess.run(cmd, cwd=safe_cwd, timeout=3600)
+            r = subprocess.run(cmd, cwd=safe_cwd, timeout=timeout)
             return {"rc": r.returncode, "out": "", "err": ""}
         else:
-            r = subprocess.run(cmd, capture_output=True, text=True, cwd=safe_cwd, timeout=600)
+            r = subprocess.run(cmd, capture_output=True, text=True, cwd=safe_cwd, timeout=timeout)
             return {"rc": r.returncode, "out": r.stdout, "err": r.stderr}
     except subprocess.TimeoutExpired:
-        return {"rc": -1, "out": "", "err": "Timeout (600s)"}
+        return {"rc": -1, "out": "", "err": f"Timeout ({timeout}s)"}
     except Exception as e:
         return {"rc": -1, "out": "", "err": str(e)}
 
@@ -220,8 +221,9 @@ def cmd_fix_health(args):
 
     print(f"  {bl('🔊')} Audio health check (Python fallback)...")
 
-    PULSE_PID = Path("/run/user/1000/pulse/pid")
-    PULSE_SOCK = Path("/run/user/1000/pulse/native")
+    RUNTIME_DIR = Path(f"/run/user/{os.getuid()}")
+    PULSE_PID = RUNTIME_DIR / "pulse" / "pid"
+    PULSE_SOCK = RUNTIME_DIR / "pulse" / "native"
     WP_LOG = Path("/tmp/void-tool-wp.log")
 
     def _running(prog, use_full=False):
@@ -275,7 +277,7 @@ def cmd_fix_health(args):
         return "Unexpected reply" in log
 
     def _restart_dbus():
-        dbus_pid = Path("/run/user/1000/dbus.pid")
+        dbus_pid = RUNTIME_DIR / "dbus.pid"
         if dbus_pid.exists():
             pid = dbus_pid.read_text().strip()
             subprocess.run(["kill", pid], capture_output=True, timeout=5)
@@ -386,7 +388,8 @@ def cmd_clean(args):
         ]
         for d, label in cache_dirs:
             if d.exists():
-                size = sum(f.stat().st_size for f in d.rglob("*") if f.is_file())
+                r = subprocess.run(["du", "-sb", str(d)], capture_output=True, text=True, timeout=30)
+                size = int(r.stdout.split()[0]) if r.returncode == 0 else 0
                 subprocess.run(["rm", "-rf", str(d)], capture_output=True, timeout=30)
                 print(f"  {label}: {size / 1024**2:.1f} MB — {gr('cleaned')}")
             else:
@@ -395,7 +398,8 @@ def cmd_clean(args):
     if "prefixes" in args.targets:
         prefixes = Path.home() / "PortProtonQt" / "prefixes"
         if prefixes.exists():
-            size = sum(f.stat().st_size for f in prefixes.rglob("*") if f.is_file())
+            r = subprocess.run(["du", "-sb", str(prefixes)], capture_output=True, text=True, timeout=30)
+            size = int(r.stdout.split()[0]) if r.returncode == 0 else 0
             print(f"  Prefixes: {size / 1024**3:.1f} GB — {yl('skipped')} (rm manually)")
         else:
             print(f"  Prefixes: {yl('not found')}")
@@ -734,7 +738,7 @@ def cmd_menu(args=None):
         ("Clean — system cache",           lambda: cmd_clean(argparse.Namespace(targets=["cache"]))),
     ]
 
-    fzf = subprocess.run(["which", "fzf"], capture_output=True, text=True).returncode == 0
+    fzf = shutil.which("fzf") is not None
 
     while True:
         if fzf:

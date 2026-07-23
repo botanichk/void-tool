@@ -99,24 +99,25 @@ START_SCRIPT="$REAL_HOME/.config/start-audio.sh"
 log "Creating $START_SCRIPT..."
 cat > "$START_SCRIPT" << 'XEOF'
 #!/bin/bash
-export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/1000/bus"
-export XDG_RUNTIME_DIR=/run/user/1000
+uid=$(id -u)
+export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus"
+export XDG_RUNTIME_DIR=/run/user/$uid
 
 if pgrep -x pulseaudio >/dev/null 2>&1; then
     pkill pulseaudio
     sleep 1
 fi
-rm -f /run/user/1000/pulse/pid
+rm -f /run/user/$uid/pulse/pid
 
 dbus_alive() {
-    [ -S /run/user/1000/bus ] || return 1
+    [ -S /run/user/$uid/bus ] || return 1
     timeout 1 dbus-send --session --dest=org.freedesktop.DBus --type=method_call --print-reply \
         /org/freedesktop/DBus org.freedesktop.DBus.ListNames >/dev/null 2>&1
 }
 
 if ! dbus_alive; then
-    rm -f /run/user/1000/bus
-    dbus-daemon --session --address="unix:path=/run/user/1000/bus" --nofork &
+    rm -f /run/user/$uid/bus
+    dbus-daemon --session --address="unix:path=/run/user/$uid/bus" --nofork &
     for i in $(seq 1 10); do
         dbus_alive && break
         sleep 0.5

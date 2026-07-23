@@ -41,12 +41,9 @@ case "$CPU_VENDOR" in
 esac
 log "CPU: $CPU_VENDOR → ${CPU_UCODE:-none}"
 
-KERNEL_PKG="$(xbps-query -l | awk '{print $2}' | grep -E '^linux(-lts|-rt)?-[0-9]' | head -n1)"
-case "$KERNEL_PKG" in
-  *linux-lts*) PKG_HEADERS="linux-lts-headers" ;;
-  *linux-rt*)  PKG_HEADERS="linux-rt-headers" ;;
-  *)           PKG_HEADERS="linux-headers" ;;
-esac
+KERNEL_PKG="$(xbps-query -l | awk '{print $2}' | grep -E '^linux[0-9.]*(-lts|-rt)?-[0-9]' | head -n1 || true)"
+KERNEL_PKG="${KERNEL_PKG:-linux}"
+PKG_HEADERS="${KERNEL_PKG%-*}-headers"
 log "Kernel: $KERNEL_PKG → headers: $PKG_HEADERS"
 
 GPU_INFO="$(lspci | grep -Ei 'vga|3d|display' || true)"

@@ -80,6 +80,7 @@ exec $SHELL
 | `zen` | ✅ устанавливает | ✅ обновляет | Zen Browser (native xbps) |
 | `ppqt` | ✅ устанавливает | ✅ обновляет | PortProtonQt (Native XBPS) |
 | `nvidia` | ✅ устанавливает | — | NVIDIA + PRIME + prime-run |
+| `nvidia-32bit` | ✅ устанавливает | — | 32-bit NVIDIA libs (Wine/Proton) |
 | `pipewire` | ✅ устанавливает | — | PipeWire на голый Void |
 
 ## Архитектура

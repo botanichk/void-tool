@@ -1,4 +1,5 @@
-use std::path::Path;
+use std::env;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
@@ -13,6 +14,12 @@ fn main() {
             std::process::exit(1);
         }
     }
+}
+
+fn runtime_dir() -> PathBuf {
+    env::var("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("/run/user/1000"))
 }
 
 fn running(name: &str) -> bool {
@@ -79,6 +86,58 @@ fn check_pulse_socket() -> bool {
         }
         Err(_) => false,
     }
+}
+
+fn wp_is_stuck() -> bool {
+    let log_path = Path::new("/tmp/void-tool-wp.log");
+    if !log_path.exists() {
+        return false;
+    }
+    match std::fs::read_to_string(log_path) {
+        Ok(content) => content.contains("Unexpected reply"),
+        Err(_) => false,
+    }
+}
+
+fn restart_dbus() -> bool {
+    let dbus_pid_path = runtime_dir().join("dbus.pid");
+
+    if dbus_pid_path.exists() {
+        if let Ok(pid_str) = std::fs::read_to_string(&dbus_pid_path) {
+            if let Ok(pid) = pid_str.trim().parse::<i32>() {
+                let _ = Command::new("kill")
+                    .arg(pid.to_string())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status();
+            }
+        }
+        std::thread::sleep(Duration::from_secs(2));
+    }
+
+    let bus_addr = format!("unix:path={}/bus", runtime_dir().display());
+    let _ = Command::new("dbus-daemon")
+        .args(["--session", "--nofork", "--address", &bus_addr])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+
+    for _ in 0..10 {
+        std::thread::sleep(Duration::from_millis(500));
+        let r = Command::new("timeout")
+            .args(["2", "dbus-send", "--session", "--dest=org.freedesktop.DBus",
+                   "--type=method_call", "--print-reply", "/org/freedesktop/DBus",
+                   "org.freedesktop.DBus.ListNames"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+        if let Ok(status) = r {
+            if status.success() {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn cmd_health() {
@@ -157,7 +216,7 @@ fn restart_stack() -> bool {
     }
 
     // clean stale files
-    let pulse_dir = Path::new("/run/user/1000/pulse");
+    let pulse_dir = runtime_dir().join("pulse");
     for f in &["pid", "native"] {
         let _ = std::fs::remove_file(pulse_dir.join(f));
     }
@@ -184,14 +243,65 @@ fn restart_stack() -> bool {
     // wait for pulse
     let start = Instant::now();
     let timeout = Duration::from_secs(15);
-    loop {
+    let pulse_came = loop {
         if check_pulse_socket() {
-            break;
+            break true;
         }
         if start.elapsed() > timeout {
-            return false;
+            break false;
         }
         std::thread::sleep(Duration::from_secs(1));
+    };
+
+    if !pulse_came {
+        if wp_is_stuck() {
+            println!("  ⟳ WirePlumber stuck on D-Bus — restarting session bus...");
+            // kill again
+            for sig in ["-15", "-9"] {
+                let _ = Command::new("pkill").args([sig, "-x", "wireplumber"]).status();
+                let _ = Command::new("pkill")
+                    .args([sig, "-f", "pipewire.*pipewire-pulse"])
+                    .status();
+                let _ = Command::new("pkill").args([sig, "-x", "pipewire"]).status();
+                std::thread::sleep(Duration::from_secs(1));
+            }
+            if !restart_dbus() {
+                return false;
+            }
+            // restart stack again
+            let _ = Command::new("/usr/bin/pipewire")
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn();
+            std::thread::sleep(Duration::from_secs(2));
+            let _ = Command::new("/usr/bin/wireplumber")
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn();
+            std::thread::sleep(Duration::from_secs(1));
+            let _ = Command::new("/usr/bin/pipewire")
+                .args(["-c", "/usr/share/pipewire/pipewire-pulse.conf"])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn();
+            // wait again
+            let start = Instant::now();
+            let timeout = Duration::from_secs(15);
+            let ok = loop {
+                if check_pulse_socket() {
+                    break true;
+                }
+                if start.elapsed() > timeout {
+                    break false;
+                }
+                std::thread::sleep(Duration::from_secs(1));
+            };
+            if !ok {
+                return false;
+            }
+        } else {
+            return false;
+        }
     }
 
     // wait for real sinks
@@ -202,8 +312,7 @@ fn restart_stack() -> bool {
             break;
         }
         if start.elapsed() > timeout {
-            // proceed anyway
-            break;
+            return false;
         }
         std::thread::sleep(Duration::from_secs(1));
     }

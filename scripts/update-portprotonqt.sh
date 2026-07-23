@@ -88,86 +88,19 @@ sed -i "/^checksum=/ s/[a-f0-9]\{64\}/$new_checksum/" "$TEMPLATE"
 
 echo "📝 Шаблон обновлён: $current_ver → $latest_ver (revision=1)"
 
-# --- bootstrap void-packages if needed ---
-# ensure git is available
-if ! command -v git &>/dev/null; then
-    echo "📥 Устанавливаю git..."
-    sudo xbps-install -Sy git
-fi
+# --- use shared build functions ---
+PKGNAME="portprotonqt"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/xbps-build-common.sh
+source "$SCRIPT_DIR/xbps-build-common.sh"
 
-VP="$REAL_HOME/void-packages"
-if [[ ! -d "$VP" ]]; then
-    echo "📥 Клонирую void-packages..."
-    git clone https://github.com/void-linux/void-packages.git "$VP"
-fi
-if [[ ! -d "$VP/masterdir" ]]; then
-    echo "🔧 Выполняю binary-bootstrap..."
-    cd "$VP"
-    if ! ./xbps-src binary-bootstrap; then
-        echo "❌ binary-bootstrap не удался"
-        echo "   Возможно проблема с файловой системой (chown)."
-        echo "   Убедись, что $VP на ext4/btrfs, не FAT/NTFS."
-        exit 1
-    fi
-    cd - >/dev/null
-fi
-
-# --- sync void-packages + masterdir with repos ---
-echo "🔄 Обновляю void-packages и синхронизирую masterdir..."
-cd "$VP"
-git fetch --quiet origin master || true
-git reset --hard origin/master || true
-if ! ./xbps-src update-sys 2>/dev/null; then
-    echo "⚠️  update-sys предупредил об ошибке, продолжаю..."
-fi
-# full upgrade of masterdir (fix stale deps like ncurses split)
-if ! sudo xbps-install -Suy -r "$VP/masterdir" 2>/dev/null; then
-    echo "❌ Не удалось синхронизировать masterdir с репозиториями"
-    mv "$TEMPLATE.bak" "$TEMPLATE" 2>/dev/null || true
-    exit 1
-fi
-cd - >/dev/null
-
-# --- build (with retry on dep failure) ---
-build_ok=false
-for attempt in 1 2; do
-    echo "🔨 Собираю пакет (попытка $attempt)..."
-    cd "$VP"
-    if ./xbps-src pkg portprotonqt; then
-        build_ok=true
-        break
-    fi
-    if [[ "$attempt" -eq 1 ]]; then
-        echo "🔄 Сборка не удалась — чищу мастердир + обновляю void-packages, пробую заново..."
-        cd "$VP"
-        ./xbps-src clean 2>/dev/null || true
-        git fetch --quiet origin master || true
-        git reset --hard origin/master || true
-        if ! ./xbps-src binary-bootstrap; then
-            echo "❌ binary-bootstrap не удался"
-            mv "$TEMPLATE.bak" "$TEMPLATE"
-            exit 1
-        fi
-        cd - >/dev/null
-    fi
-done
-
-if ! $build_ok; then
-    echo "❌ Сборка не удалась, откатываю шаблон..."
+xbps_ensure_repo_and_bootstrap || { mv "$TEMPLATE.bak" "$TEMPLATE" 2>/dev/null || true; exit 1; }
+xbps_sync_repo_and_masterdir || { mv "$TEMPLATE.bak" "$TEMPLATE" 2>/dev/null || true; exit 1; }
+if ! xbps_build_with_retry "$PKGNAME"; then
     mv "$TEMPLATE.bak" "$TEMPLATE"
     exit 1
 fi
-
-# --- install ---
-echo "📦 Устанавливаю..."
-if command -v xi &>/dev/null; then
-    sudo xi -y portprotonqt
-elif command -v xbps-install &>/dev/null; then
-    sudo xbps-install -y --repository="$REAL_HOME/void-packages/hostdir/binpkgs" portprotonqt
-else
-    echo "⚠️  xbps-install не найден, установи вручную:"
-    echo "   sudo xbps-install -y --repository=$REAL_HOME/void-packages/hostdir/binpkgs portprotonqt"
-fi
+xbps_install_package "$PKGNAME"
 
 rm -f "$TEMPLATE.bak"
 echo "✅ portprotonqt обновлён до $latest_ver"
