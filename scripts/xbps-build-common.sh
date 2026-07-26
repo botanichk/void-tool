@@ -30,10 +30,7 @@ xbps_sync_repo_and_masterdir() {
     if ! (cd "$VP" && ./xbps-src update-sys 2>/dev/null); then
         echo "⚠️  update-sys предупредил об ошибке, продолжаю..."
     fi
-    if ! sudo xbps-install -Suy -r "$VP/masterdir" 2>/dev/null; then
-        echo "❌ Не удалось синхронизировать masterdir с репозиториями"
-        return 1
-    fi
+    sudo xbps-install -Suy -r "$VP/masterdir" 2>/dev/null || echo "⚠️  masterdir sync skipped (non-fatal)"
 }
 
 xbps_build_with_retry() {
@@ -68,12 +65,22 @@ xbps_build_with_retry() {
 xbps_install_package() {
     local pkg="$1"
     echo "📦 Устанавливаю..."
+    local repo="$REAL_HOME/void-packages/hostdir/binpkgs"
+    local cmd
     if command -v xi &>/dev/null; then
-        sudo xi -y "$pkg"
-    elif command -v xbps-install &>/dev/null; then
-        sudo xbps-install -y --repository="$REAL_HOME/void-packages/hostdir/binpkgs" "$pkg"
+        cmd="xi -y $pkg"
     else
-        echo "⚠️  xbps-install не найден, установи вручную:"
-        echo "   sudo xbps-install -y --repository=$REAL_HOME/void-packages/hostdir/binpkgs $pkg"
+        cmd="xbps-install -y --repository=$repo $pkg"
+    fi
+
+    if sudo -n true 2>/dev/null; then
+        sudo $cmd
+    else
+        echo ""
+        echo "  sudo $cmd"
+        echo ""
+        /usr/bin/sudo -v 2>/dev/null && sudo $cmd && return
+        echo "⚠️  Требуется sudo. Запусти в терминале:"
+        echo "   sudo $cmd"
     fi
 }

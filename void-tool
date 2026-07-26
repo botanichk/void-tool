@@ -404,7 +404,148 @@ def cmd_clean(args):
         else:
             print(f"  Prefixes: {yl('not found')}")
 
+    if "kernels" in args.targets:
+        return cmd_clean_kernels(args)
+
     return 1 if any_errors else 0
+
+
+def cmd_clean_kernels(args):
+    boot = Path("/boot")
+    current = os.uname().release
+
+    kernels = sorted(boot.glob("vmlinuz-*"), key=lambda p: p.stat().st_mtime)
+    if not kernels:
+        print(f"  {yl('ℹ')} No kernels found in /boot")
+        return 0
+
+    vkpurge_list = []
+    r = subprocess.run(["vkpurge", "list"], capture_output=True, text=True, timeout=10)
+    if r.returncode == 0:
+        vkpurge_list = [v.strip() for v in r.stdout.strip().split("\n") if v.strip()]
+
+    def _parse(v):
+        parts = v.split(".")
+        return (int(parts[0]), int(parts[1]), int(parts[2].split("_")[0]), int(parts[2].split("_")[1]))
+
+    versions = []
+    for k in kernels:
+        ver = k.name[len("vmlinuz-"):]
+        try:
+            key = _parse(ver)
+        except (IndexError, ValueError):
+            continue
+        series = f"{key[0]}.{key[1]}"
+        versions.append((ver, key, series))
+
+    versions.sort(key=lambda x: x[1])
+
+    series_groups = {}
+    for v, key, s in versions:
+        series_groups.setdefault(s, []).append(v)
+
+    protected = set()
+    for s, vers in series_groups.items():
+        vers_sorted = sorted(vers, key=_parse, reverse=True)
+        for i, v in enumerate(vers_sorted):
+            if i < 2 or v == current:
+                protected.add(v)
+
+    candidates = [v for v, _, _ in versions if v not in protected]
+    # Also mark what vkpurge can handle
+    vkpurge_candidates = set(vkpurge_list) & set(candidates)
+
+    print(f"\n  {'#':<4} {'Версия':<18} {'Серия':<7} {'Размер':>7}  {'Статус'}")
+    print(f"  {'─'*4} {'─'*18} {'─'*7} {'─'*7}  {'─'*14}")
+    for i, (v, key, s) in enumerate(versions, 1):
+        sz = next((k.stat().st_size for k in kernels if k.name == f"vmlinuz-{v}"), 0)
+        if v == current:
+            st = gr("← текущее")
+        elif v in protected:
+            st = gr("оставлено")
+        elif v in vkpurge_candidates:
+            st = rd("vkpurge")
+        else:
+            st = rd("вручную")
+        print(f"  {i:<4} {v:<18} {s:<7} {sz/1024:>6.0f}K  {st}")
+
+    print(f"\n  {bl('ℹ')} Защищено: {len(protected)} (2 последних в серии + текущее)")
+    print(f"  {bl('ℹ')} К удалению: {len(candidates)} ({len(vkpurge_candidates)} через vkpurge)")
+    if not candidates:
+        print(f"  {gr('✓')} Нечего удалять")
+        return 0
+
+    if getattr(args, "dry_run", False):
+        print(f"\n  {yl('⚠')} Пробный запуск — ничего не удалено")
+        for v in candidates:
+            print(f"     будет удалено: {v}")
+        return 0
+
+    print(f"\n  {bl('ℹ')} Введи номера через пробел или запятую. Пример: {'1 2 5'} или {'1-3'}")
+    try:
+        c = input(f"  {yl('Какие удалить?')} [1-{len(versions)}, a=все, q=выход]: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return 1
+
+    if c.lower() in ("q", ""):
+        print(f"  {yl('ℹ')} Отменено")
+        return 0
+    elif c.lower() == "a":
+        selected = candidates
+    else:
+        indices = set()
+        for part in c.replace(",", " ").split():
+            if "-" in part:
+                lo, hi = part.split("-", 1)
+                for n in range(int(lo), int(hi) + 1):
+                    indices.add(n)
+            else:
+                indices.add(int(part))
+        selected = []
+        for i, (v, _, _) in enumerate(versions, 1):
+            if i in indices and v in candidates:
+                selected.append(v)
+
+    if not selected:
+        print(f"  {yl('ℹ')} Ничего не выбрано (защищённые ядра пропущены)")
+        return 0
+
+    print(f"  {yl('⟳')} Авторизация sudo...", end=" ", flush=True)
+    r = subprocess.run(["sudo", "-v"], capture_output=True, timeout=30)
+    if r.returncode != 0:
+        print(rd("ошибка"))
+        return 1
+    print(gr("ок"))
+
+    freed = 0
+    for v in selected:
+        if v in vkpurge_candidates:
+            print(f"  ⟳ vkpurge rm {v}...", end=" ", flush=True)
+            r = subprocess.run(["sudo", "vkpurge", "rm", v],
+                               capture_output=True, text=True, timeout=120)
+            if r.returncode == 0:
+                print(gr("готово"))
+            else:
+                print(rd(f"ошибка: {r.stderr.strip()[:80]}"))
+        else:
+            print(f"  ⟳ rm {v}...", end=" ", flush=True)
+            for pattern in ("vmlinuz", "initramfs", "config"):
+                for f in boot.glob(f"{pattern}-{v}*"):
+                    sz = f.stat().st_size
+                    f.unlink()
+                    freed += sz
+            print(gr("готово"))
+
+    if any(v not in vkpurge_candidates for v in selected):
+        print(f"  ⟳ Обновление GRUB...", end=" ", flush=True)
+        r = subprocess.run(["sudo", "grub-mkconfig", "-o", "/boot/grub/grub.cfg"],
+                           capture_output=True, text=True, timeout=30)
+        print(gr("готово") if r.returncode == 0 else rd(f"ошибка: {r.stderr.strip()[:80]}"))
+
+    remain = sum(1 for v, _, _ in versions if boot.glob(f"vmlinuz-{v}*"))
+    print(f"\n  {gr('✓')} Готово. Осталось ядер: {remain}")
+    return 0
 
 
 # ── trigger ─────────────────────────────────────────────
@@ -425,11 +566,24 @@ def cmd_trigger(args):
     if elapsed < interval:
         return 0
 
-    STATE_FILE.write_text(str(now))
     print(f"{TOOL_NAME}: checking (last check {elapsed:.0f}d ago)")
     rc = cmd_update_check(args)
-    print()
-    cmd_fix_health(args)
+
+    if rc != 0:
+        updates = []
+        config = load_config()
+        for name in config.get("modules", {}):
+            result = run_script(config["modules"][name]["script"], ["--check"])
+            if result["rc"] == 1:
+                updates.append(name)
+        if updates:
+            subprocess.run(
+                ["notify-send", "--icon=software-update-available",
+                 f"{TOOL_NAME}: updates available",
+                 ", ".join(updates)],
+                capture_output=True, timeout=5)
+
+    STATE_FILE.write_text(str(now))
     return rc
 
 
@@ -441,13 +595,14 @@ _void-tool_completions() {
     local prev="${COMP_WORDS[COMP_CWORD-1]}"
 
     if [[ $COMP_CWORD -eq 1 ]]; then
-        COMPREPLY=($(compgen -W "install update fix clean trigger completions menu self-install setup" -- "$cur"))
+        COMPREPLY=($(compgen -W "install update fix clean info search trigger completions menu self-install setup" -- "$cur"))
     elif [[ $COMP_CWORD -eq 2 ]]; then
         case "$prev" in
             install) COMPREPLY=($(compgen -W "zen ppqt nvidia nvidia-32bit pipewire void-tool" -- "$cur")) ;;
             update)  COMPREPLY=($(compgen -W "check status $(void-tool _list_modules 2>/dev/null)" -- "$cur")) ;;
             fix)     COMPREPLY=($(compgen -W "health" -- "$cur")) ;;
-            clean)   COMPREPLY=($(compgen -W "builds cache prefixes" -- "$cur")) ;;
+            clean)   COMPREPLY=($(compgen -W "builds cache prefixes kernels" -- "$cur")) ;;
+            search)  COMPREPLY=($(compgen -W "xbps flatpak appimage all" -- "$cur")) ;;
             completions) COMPREPLY=($(compgen -W "bash zsh install" -- "$cur")) ;;
         esac
     fi
@@ -467,7 +622,7 @@ _void-tool() {
 
     case $state in
         command)
-            _values 'command' install update fix clean trigger completions menu self-install setup
+            _values 'command' install update fix clean info search trigger completions menu self-install setup
             ;;
         args)
             case $words[2] in
@@ -475,7 +630,8 @@ _void-tool() {
                 update)  _values 'action' check status $(void-tool _list_modules 2>/dev/null) ;;
                 fix)     _values 'target' health ;;
                 setup)   _values 'action' all ;;
-                clean)   _values 'target' builds cache prefixes ;;
+                clean)   _values 'target' builds cache prefixes kernels ;;
+                search)  _values 'source' xbps flatpak appimage all ;;
                 completions) _values 'shell' bash zsh install ;;
             esac
             ;;
@@ -710,7 +866,271 @@ def cmd_setup(args):
     return 0
 
 
+# ── info ────────────────────────────────────────────────
+
+def cmd_info(args):
+    hostname = os.uname().nodename
+    kernel = os.uname().release
+    uptime_sec = float(open("/proc/uptime").read().split()[0])
+    days = int(uptime_sec / 86400)
+    hours = int((uptime_sec % 86400) / 3600)
+    mins = int((uptime_sec % 3600) / 60)
+
+    def _u():
+        if days: return f"{days}д {hours}ч"
+        if hours: return f"{hours}ч {mins}мин"
+        return f"{mins}мин"
+
+    print(f"  {bl('void-tool info')} — {hostname}")
+    print(f"  {'─' * 42}")
+    print(f"  Ядро:        {kernel}")
+    print(f"  Система:     {_u()}")
+
+    mem = {}
+    for line in open("/proc/meminfo"):
+        parts = line.split()
+        mem[parts[0].rstrip(":")] = int(parts[1])
+    total = mem["MemTotal"] / 1024**2
+    avail = mem["MemAvailable"] / 1024**2
+    print(f"  Память:      {avail:.1f}/{total:.1f} GB")
+
+    r = subprocess.run(["df", "-h", "/"], capture_output=True, text=True, timeout=5)
+    _, size, used, free, *_ = r.stdout.strip().split("\n")[1].split()
+    print(f"  Диск (/):    {used} / {size}  (свободно {free})")
+
+    boot = Path("/boot")
+    is_separate = subprocess.run(
+        ["findmnt", "-n", "-o", "SOURCE", str(boot)],
+        capture_output=True, text=True, timeout=5
+    ).stdout.strip()
+    if is_separate:
+        r = subprocess.run(["df", "-h", str(boot)], capture_output=True, text=True, timeout=5)
+        _, bsize, bused, bfree, *_ = r.stdout.strip().split("\n")[1].split()
+        print(f"  /boot:       {bused} / {bsize}  (свободно {bfree})")
+
+    kernels = sorted(boot.glob("vmlinuz-*"), key=lambda p: p.stat().st_mtime)
+    current = os.uname().release
+    cur = next((i + 1 for i, k in enumerate(kernels) if current in k.name), 0)
+    print(f"  Ядер:        {len(kernels)} в /boot (текущее #{cur})")
+
+    def _running(prog, full=False):
+        r = subprocess.run(["pgrep", "-f" if full else "-x", prog], capture_output=True, timeout=3)
+        return r.returncode == 0
+
+    def _sym(v): return gr("✅") if v else rd("❌")
+    pw = _running("pipewire")
+    wp = _running("wireplumber")
+    pp = _running("pipewire-pulse", full=True)
+    r2 = subprocess.run(["timeout", "2", "pactl", "info"], capture_output=True, timeout=5)
+    ps = r2.returncode == 0
+    print(f"  Audio:       PW {_sym(pw)} WP {_sym(wp)} PP {_sym(pp)} pulse {_sym(ps)}")
+
+    if shutil.which("nvidia-smi"):
+        r = subprocess.run(["nvidia-smi", "--query-gpu=driver_version,temperature.gpu,name", "--format=csv,noheader"],
+                           capture_output=True, text=True, timeout=5)
+        if r.returncode == 0:
+            print(f"  NVIDIA:      {r.stdout.strip()}")
+
+    return 0
+
+
+# ── search ──────────────────────────────────────────────
+
+SEARCH_SOURCES = {"xbps", "flatpak", "appimage", "all"}
+
+def _search_xbps(query, out, installable):
+    r = subprocess.run(["xbps-query", "-Rs", query], capture_output=True, text=True, timeout=15)
+    if r.returncode != 0 or not r.stdout.strip():
+        r = subprocess.run(["xbps-query", "-Rs", f"*{query}*"], capture_output=True, text=True, timeout=15)
+    pkgs = []
+    for line in r.stdout.strip().split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        rest = line[4:].strip() if len(line) > 4 else line
+        parts = rest.split(None, 1)
+        if len(parts) < 2:
+            continue
+        name_ver, desc = parts[0], parts[1]
+        idx = name_ver.rfind("-")
+        if idx > 0:
+            name = name_ver[:idx]
+            ver = name_ver[idx+1:]
+            pkgs.append((name, ver, desc))
+    if not pkgs:
+        out.append((f"  {yl('ℹ')} Нет совпадений в xbps", None, None))
+        return
+    out.append((gr(f"  ═══ xbps ({len(pkgs)} совпадений) ═══"), None, None))
+    for name, ver, desc in pkgs[:20]:
+        installable.append(("xbps", name, f"{name}  {ver}  {desc}"))
+        out.append((f"  {name:<30} {ver:<16} {desc}", "xbps", name))
+    if len(pkgs) > 20:
+        out.append((f"  {yl('...и ещё')} {len(pkgs)-20}", None, None))
+
+
+def _search_flatpak(query, out, installable):
+    if not shutil.which("flatpak"):
+        out.append((f"  {yl('ℹ')} flatpak не установлен", None, None))
+        return
+    r = subprocess.run(["flatpak", "search", query], capture_output=True, text=True, timeout=15)
+    lines = r.stdout.strip().split("\n")
+    if len(lines) <= 1:
+        out.append((f"  {yl('ℹ')} Нет совпадений в flatpak", None, None))
+        return
+    out.append((gr(f"  ═══ flatpak ({len(lines)-1} совпадений) ═══"), None, None))
+    header = True
+    for line in lines:
+        if header:
+            header = False
+            continue
+        parts = line.split("\t")
+        if len(parts) >= 6:
+            name = parts[0]
+            desc = parts[1]
+            app_id = parts[2]
+            ver = parts[3]
+            installable.append(("flatpak", app_id, f"{app_id}  {ver}  {name}"))
+            out.append((f"  {app_id:<40} {ver:<12} {name}", "flatpak", app_id))
+
+
+def _search_appimage_local(query, out, installable):
+    dirs = [Path.home() / "Applications", Path.home() / "AppImages",
+            Path.home() / ".local" / "bin"]
+    found = []
+    for d in dirs:
+        if d.exists():
+            for f in d.glob("*.AppImage"):
+                if query.lower() in f.stem.lower():
+                    found.append(f)
+    if found:
+        out.append((gr(f"  ═══ appimage (локальные) ═══"), None, None))
+        for f in found:
+            sz = f.stat().st_size / 1024**2
+            installable.append(("appimage-lokal", str(f), f.name))
+            out.append((f"  {f.stem:<30} {sz:.0f}M", "appimage-lokal", str(f)))
+
+
+def _search_appimage_hub(query, out, installable):
+    try:
+        r = subprocess.run(
+            ["curl", "-sL", "--max-time", "8",
+             "https://appimage.github.io/feed.json"],
+            capture_output=True, text=True, timeout=12)
+        if r.returncode != 0:
+            out.append((f"  {yl('ℹ')} AppImageHub недоступен", None, None))
+            return
+        import json
+        data = json.loads(r.stdout)
+        hits = []
+        for item in data.get("items", []):
+            name = item.get("name", "")
+            desc = item.get("description", "") or ""
+            if query.lower() in name.lower() or query.lower() in desc.lower():
+                hits.append((name, desc, item.get("categories", "")))
+        if hits:
+            out.append((gr(f"  ═══ AppImageHub ({len(hits)} совпадений) ═══"), None, None))
+            for name, desc, cat in hits[:15]:
+                installable.append(("appimage", name, f"{name}  {desc[:60]}"))
+                out.append((f"  {name:<30} {desc[:60]}", "appimage", name))
+            if len(hits) > 15:
+                out.append((f"  {yl('...и ещё')} {len(hits)-15}", None, None))
+        else:
+            out.append((f"  {yl('ℹ')} Нет совпадений в AppImageHub", None, None))
+    except Exception:
+        out.append((f"  {yl('ℹ')} AppImageHub недоступен", None, None))
+
+
+def _install_selected(source, name):
+    if source == "xbps":
+        print(f"  {yl('⟳')} xbps-install {name}...")
+        r = subprocess.run(["sudo", "-v"], capture_output=True, timeout=30)
+        if r.returncode != 0:
+            print(f"  {rd('✗')} Нужен sudo: sudo xbps-install -y {name}")
+            return
+        r = subprocess.run(["sudo", "xbps-install", "-y", name],
+                           capture_output=True, text=True, timeout=120)
+        if r.returncode == 0:
+            print(f"  {gr('✓')} {name} установлен")
+        else:
+            print(f"  {rd('✗')} Ошибка: {r.stderr.strip()[:100]}")
+    elif source == "flatpak":
+        print(f"  {yl('⟳')} flatpak install {name}...")
+        r = subprocess.run(["flatpak", "install", "-y", name],
+                           capture_output=True, text=True, timeout=120)
+        if r.returncode == 0:
+            print(f"  {gr('✓')} {name} установлен")
+        else:
+            print(f"  {rd('✗')} Ошибка: {r.stderr.strip()[:100]}")
+    elif source == "appimage":
+        print(f"  {yl('ℹ')} AppImage: https://appimage.github.io/{name}/")
+    elif source == "appimage-lokal":
+        print(f"  {yl('ℹ')} Запусти: chmod +x '{name}' && '{name}'")
+
+
+def cmd_search(args):
+    if args.targets[0].lower() in SEARCH_SOURCES:
+        source = args.targets[0].lower()
+        query = " ".join(args.targets[1:])
+    else:
+        source = "all"
+        query = " ".join(args.targets)
+
+    if not query:
+        print(f"  {yl('ℹ')} {TOOL_NAME} search [xbps|flatpak|appimage|all] <запрос>")
+        return 0
+
+    out = []
+    installable = []
+    searched = []
+    if source in ("xbps", "all"):
+        _search_xbps(query, out, installable)
+        searched.append("xbps")
+    if source in ("flatpak", "all"):
+        _search_flatpak(query, out, installable)
+        searched.append("flatpak")
+    if source in ("appimage", "all"):
+        _search_appimage_local(query, out, installable)
+        _search_appimage_hub(query, out, installable)
+        searched.append("appimage")
+
+    for block in out:
+        print(block[0])
+
+    if not installable:
+        return 0
+
+    while True:
+        try:
+            c = input(f"\n  {yl('Установить?')} [1-{len(installable)}, q=нет]: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+        if c.lower() in ("q", ""):
+            break
+        try:
+            idx = int(c) - 1
+            if 0 <= idx < len(installable):
+                src, name, label = installable[idx]
+                print(f"  {bl('⟳')} Установка: {label}")
+                _install_selected(src, name)
+            else:
+                print(f"  {rd('Введите число от 1 до')} {len(installable)}")
+        except ValueError:
+            print(f"  {rd('Введите число')}")
+    return 0
+
+
 # ── menu ────────────────────────────────────────────────
+
+def _search_menu():
+    try:
+        q = input(f"  {yl('Запрос')}: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return
+    if q:
+        cmd_search(argparse.Namespace(targets=q.split()))
+
 
 def cmd_menu(args=None):
     """Interactive menu using fzf (if available) or simple numbered prompt."""
@@ -727,6 +1147,10 @@ def cmd_menu(args=None):
         ("Install — NVIDIA Drivers",       lambda: cmd_install(argparse.Namespace(packages=["nvidia"]))),
         ("Install — PipeWire (Void)",      lambda: cmd_install(argparse.Namespace(packages=["pipewire"]))),
         ("Install — NVIDIA 32-bit libs",   lambda: cmd_install(argparse.Namespace(packages=["nvidia-32bit"]))),
+        ("─── search ──────────────────────", None),
+        ("Search — packages (xbps/flatpak/appimage)", lambda: _search_menu()),
+        ("─── info ────────────────────────", None),
+        ("Info — system info",             lambda: cmd_info(None)),
         ("─── fix ────────────────────────", None),
         ("Fix — audio health check",       lambda: cmd_fix_health(None)),
         ("─── setup ──────────────────────", None),
@@ -736,6 +1160,7 @@ def cmd_menu(args=None):
         ("─── clean ──────────────────────", None),
         ("Clean — xbps-src builds",        lambda: cmd_clean(argparse.Namespace(targets=["builds"]))),
         ("Clean — system cache",           lambda: cmd_clean(argparse.Namespace(targets=["cache"]))),
+        ("Clean — old kernels",            lambda: cmd_clean(argparse.Namespace(targets=["kernels"], dry_run=False))),
     ]
 
     fzf = shutil.which("fzf") is not None
@@ -815,9 +1240,14 @@ def make_parser():
 
     # clean
     pc = sub.add_parser("clean", help="Clean build artifacts")
-    pc.add_argument("targets", nargs="+", choices=["builds", "cache", "prefixes"],
+    pc.add_argument("targets", nargs="+", choices=["builds", "cache", "prefixes", "kernels"],
                     help="What to clean")
+    pc.add_argument("--dry-run", action="store_true",
+                    help="With kernels: show what would be removed without deleting")
 
+    sub.add_parser("info", help="Show system information summary")
+    ps = sub.add_parser("search", help="Search packages (xbps, flatpak, appimage)")
+    ps.add_argument("targets", nargs="+", help="[xbps|flatpak|appimage|all] <query>")
     sub.add_parser("trigger", help="For Hyprland: check interval, then check+health")
 
     pcomp = sub.add_parser("completions", help="Generate shell completion scripts")
@@ -847,6 +1277,8 @@ def main():
         "install":       cmd_install,
         "fix":           cmd_fix_health,
         "clean":         cmd_clean,
+        "info":          cmd_info,
+        "search":        cmd_search,
         "trigger":       cmd_trigger,
         "completions":   cmd_completions,
         "menu":          cmd_menu,
