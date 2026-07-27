@@ -6,7 +6,7 @@ LOG="/tmp/void-tool-nvidia.log"
 log() { echo "[nvidia] $*" | tee -a "$LOG"; }
 
 check_installed() {
-    if xbps-query nvidia >/dev/null 2>&1 && nvidia-smi &>/dev/null; then
+    if (xbps-query nvidia >/dev/null 2>&1 || xbps-query nvidia580 >/dev/null 2>&1 || xbps-query nvidia470 >/dev/null 2>&1 || xbps-query nvidia390 >/dev/null 2>&1) && nvidia-smi &>/dev/null; then
         return 0
     fi
     return 1
@@ -66,11 +66,28 @@ elif [[ "$HAS_INTEL" -eq 1 ]]; then
     log "Detected Intel-only"
 fi
 
+detect_nvidia_pkg() {
+    local chip
+    chip=$(lspci | grep -i nvidia | head -1 | grep -oiP '(GK|GF|GT)[0-9]{3}')
+    if [[ "$chip" =~ ^GK ]]; then
+        echo "nvidia470"
+    elif [[ "$chip" =~ ^GF ]]; then
+        echo "nvidia390"
+    else
+        echo "nvidia580"
+    fi
+}
+
 PKGS=("linux-firmware" "$PKG_HEADERS")
 [[ -n "$CPU_UCODE" ]] && PKGS+=("$CPU_UCODE")
 
 if [[ "$HAS_NVIDIA" -eq 1 ]]; then
-    PKGS+=("nvidia" "nvidia-libs" "nvidia-libs-32bit" "nvidia-dkms")
+    NVIDIA_PKG=$(detect_nvidia_pkg)
+    log "Detected $NVIDIA_PKG (chip family: $(lspci | grep -i nvidia | head -1 | grep -oiP '(GK|GF|GT|GM|GP|TU|GA|AD)[0-9]{3}' || echo 'unknown'))"
+    PKGS+=("$NVIDIA_PKG" "${NVIDIA_PKG}-libs" "${NVIDIA_PKG}-dkms")
+    if [[ "$NVIDIA_PKG" != "nvidia580" ]]; then
+        PKGS+=("${NVIDIA_PKG}-libs-32bit")
+    fi
     if [[ "$HAS_HYBRID" -eq 0 ]]; then
         PKGS+=("xf86-video-nouveau" "mesa-dri")
     fi

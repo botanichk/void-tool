@@ -9,11 +9,12 @@ import sys
 import time
 from pathlib import Path
 
-CONFIG_DIR = Path.home() / ".config" / "void-update"
-STATE_DIR = Path.home() / ".local" / "state" / "void-update"
-CONFIG_FILE = CONFIG_DIR / "config.toml"
+TOOL_DIR = Path(__file__).resolve().parent
+CONFIG_FILE = TOOL_DIR / "config.toml"
+STATE_DIR = TOOL_DIR / "state"
 STATE_FILE = STATE_DIR / "last-check"
-SCRIPTS_DIR = Path.home() / "scripts"
+SCRIPTS_DIR = TOOL_DIR / "scripts"
+KRS_BIN = TOOL_DIR / "krs-bin"
 
 DEFAULT_CONFIG = """\
 interval_days = 7
@@ -50,7 +51,7 @@ TAGLINE = f"rSAkv 🦀 rusty Swiss Army knife from the Void v{VERSION}"
 
 def load_config():
     if not CONFIG_FILE.exists():
-        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
         CONFIG_FILE.write_text(DEFAULT_CONFIG)
 
     try:
@@ -207,9 +208,8 @@ def cmd_install(args):
 
 def cmd_fix_health(args):
     """Check PipeWire stack health and restart if needed."""
-    krs_bin = Path.home() / ".local" / "bin" / "krs"
-    if krs_bin.exists():
-        r = subprocess.run([str(krs_bin), "health"], capture_output=True, text=True, timeout=60)
+    if KRS_BIN.exists():
+        r = subprocess.run([str(KRS_BIN), "health"], capture_output=True, text=True, timeout=60)
         for line in r.stdout.split("\n"):
             if line.strip():
                 print(f"  {line}")
@@ -679,7 +679,7 @@ def cmd_list_modules(args):
 # ── self-install ─────────────────────────────────────────
 
 def cmd_self_install(args):
-    """Install void-tool from repo clone to system (~/.local/bin)."""
+    """Install void-tool from repo clone to ~/void-tool/."""
     repo_dir = Path(args.source).resolve()
     scripts_src = repo_dir / "scripts"
     krs_src = repo_dir / "krs"
@@ -690,33 +690,32 @@ def cmd_self_install(args):
 
     print(f"  {bl('⟳')} Installing void-tool from {repo_dir}...")
 
-    # 1. copy main script
-    bin_dir = Path.home() / ".local" / "bin"
-    bin_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(str(repo_dir / "void-tool"), str(bin_dir / "void-tool"))
-    (bin_dir / "void-tool").chmod(0o755)
-    print(f"  ✓ {gr('void-tool')} → {bin_dir}")
+    # 1. create ~/void-tool/ and copy main script
+    tool_dir = Path.home() / "void-tool"
+    tool_dir.mkdir(parents=True, exist_ok=True)
+    dest_script = tool_dir / "void-tool"
+    shutil.copy2(str(repo_dir / "void-tool"), str(dest_script))
+    dest_script.chmod(0o755)
+    print(f"  ✓ {gr('void-tool')} → {tool_dir}")
 
     # 2. copy scripts
     if scripts_src.exists():
-        user_scripts = Path.home() / "scripts"
-        user_scripts.mkdir(parents=True, exist_ok=True)
+        dest_scripts = tool_dir / "scripts"
+        dest_scripts.mkdir(parents=True, exist_ok=True)
         for f in scripts_src.glob("*.sh"):
-            shutil.copy2(str(f), str(user_scripts / f.name))
-            (user_scripts / f.name).chmod(0o755)
-            print(f"  ✓ {f.name} → {user_scripts}")
+            shutil.copy2(str(f), str(dest_scripts / f.name))
+            (dest_scripts / f.name).chmod(0o755)
+            print(f"  ✓ {f.name} → {dest_scripts}")
 
-        # copy templates next to scripts
         templates_src = repo_dir / "templates"
         if templates_src.exists():
-            user_templates = user_scripts / "templates"
-            if user_templates.exists():
-                shutil.rmtree(str(user_templates))
-            shutil.copytree(str(templates_src), str(user_templates))
-            print(f"  ✓ templates → {user_templates}")
+            dest_templates = dest_scripts / "templates"
+            if dest_templates.exists():
+                shutil.rmtree(str(dest_templates))
+            shutil.copytree(str(templates_src), str(dest_templates))
+            print(f"  ✓ templates → {dest_templates}")
 
     # 3. build and install krs
-    krs_bin = bin_dir / "krs"
     if krs_src.exists():
         cargo = shutil.which("cargo")
         if cargo:
@@ -727,31 +726,38 @@ def cmd_self_install(args):
             if r.returncode == 0:
                 built = krs_src / "target" / "release" / "krs"
                 if built.exists():
-                    shutil.copy2(str(built), str(krs_bin))
-                    krs_bin.chmod(0o755)
-                    print(f"  ✓ krs (Rust) → {krs_bin}")
+                    shutil.copy2(str(built), str(tool_dir / "krs"))
+                    (tool_dir / "krs").chmod(0o755)
+                    print(f"  ✓ krs (Rust) → {tool_dir}")
             else:
                 print(f"  {yl('⚠')} krs build failed — install cargo and run manually")
-                print(f"     cd {krs_src} && cargo build --release && cp target/release/krs ~/.local/bin/")
+                print(f"     cd {krs_src} && cargo build --release && cp target/release/krs {tool_dir}/")
         else:
             print(f"  {yl('⚠')} cargo not found — install rustup first, then build krs manually")
-            print(f"     cd {krs_src} && cargo build --release && cp target/release/krs ~/.local/bin/")
+            print(f"     cd {krs_src} && cargo build --release && cp target/release/krs {tool_dir}/")
 
     # 4. create default config
-    config_file = CONFIG_DIR / "config.toml"
-    if not config_file.exists():
-        config_file.parent.mkdir(parents=True, exist_ok=True)
-        config_file.write_text(DEFAULT_CONFIG)
-        print(f"  ✓ config → {config_file}")
+    if not CONFIG_FILE.exists():
+        CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        CONFIG_FILE.write_text(DEFAULT_CONFIG)
+        print(f"  ✓ config → {CONFIG_FILE}")
     else:
-        print(f"  ✓ config exists → {config_file}")
+        print(f"  ✓ config exists → {CONFIG_FILE}")
 
-    # 5. install completions
+    # 5. symlink ~/.local/bin/void-tool → ~/void-tool/void-tool
+    local_bin = Path.home() / ".local" / "bin"
+    local_bin.mkdir(parents=True, exist_ok=True)
+    link = local_bin / "void-tool"
+    link.unlink(missing_ok=True)
+    link.symlink_to(str(dest_script))
+    print(f"  ✓ symlink → {link}")
+
+    # 6. install completions
     cmd_completions(argparse.Namespace(shell="install"))
 
-    print(f"\n  {gr('✓')} void-tool installed. Reload shell or run:")
-    print(f"     exec $SHELL")
-    print(f"     void-tool --version")
+    print(f"\n  {gr('✓')} void-tool installed in {tool_dir}")
+    print(f"     symlink: {link}")
+    print(f"     run: void-tool --version")
     return 0
 
 
@@ -844,17 +850,11 @@ def cmd_setup(args):
         sudo_run(["xbps-install", "-Sy", "base-devel"], "base-devel: устанавливаю")
 
     # 5. templates
-    scripts_tpl = Path.home() / "scripts" / "templates"
+    scripts_tpl = TOOL_DIR / "scripts" / "templates"
     if scripts_tpl.exists():
         print(f"  ✓ templates: {gr('found')}")
     else:
-        for src in [Path.home() / "void-tool" / "templates"]:
-            if src.exists():
-                shutil.copytree(str(src), str(scripts_tpl), dirs_exist_ok=True)
-                print(f"  ✓ templates: {gr('copied')}")
-                break
-        if not scripts_tpl.exists():
-            print(f"  {yl('⚠')} templates: не найдены — install zen/ppqt может не сработать")
+        print(f"  {yl('⚠')} templates: не найдены — install zen/ppqt может не сработать")
 
     print()
     if ok:
