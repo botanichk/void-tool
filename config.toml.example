@@ -10,14 +10,17 @@ script = "update-portprotonqt.sh"
 
 [modules.nvidia]
 enabled = true
+update = false
 script = "install-nvidia.sh"
 
 [modules.pipewire]
 enabled = true
+update = false
 script = "install-pipewire.sh"
 
 [modules.nvidia-32bit]
 enabled = true
+update = false
 script = "install-nvidia-32bit.sh"
 
 [modules.void-tool]

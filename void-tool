@@ -29,14 +29,17 @@ script = "update-portprotonqt.sh"
 
 [modules.nvidia]
 enabled = true
+update = false
 script = "install-nvidia.sh"
 
 [modules.nvidia-32bit]
 enabled = true
+update = false
 script = "install-nvidia-32bit.sh"
 
 [modules.pipewire]
 enabled = true
+update = false
 script = "install-pipewire.sh"
 
 [modules.void-tool]
@@ -170,6 +173,9 @@ def cmd_update_run(args):
             continue
         if not modules[name].get("enabled", True):
             print(yl(f"Skipping disabled module: {name}"))
+            continue
+        if not modules[name].get("update", True):
+            print(yl(f"Skipping install-only module: {name}"))
             continue
 
         print(f"\n{bl('⟳')} Updating {bd(name)}...")
@@ -694,12 +700,15 @@ def cmd_self_install(args):
     tool_dir = Path.home() / "void-tool"
     tool_dir.mkdir(parents=True, exist_ok=True)
     dest_script = tool_dir / "void-tool"
-    shutil.copy2(str(repo_dir / "void-tool"), str(dest_script))
-    dest_script.chmod(0o755)
-    print(f"  ✓ {gr('void-tool')} → {tool_dir}")
+    if repo_dir.resolve() != tool_dir.resolve():
+        shutil.copy2(str(repo_dir / "void-tool"), str(dest_script))
+        dest_script.chmod(0o755)
+        print(f"  ✓ {gr('void-tool')} → {tool_dir}")
+    else:
+        print(f"  ✓ {gr('void-tool')} already in {tool_dir}")
 
     # 2. copy scripts
-    if scripts_src.exists():
+    if scripts_src.exists() and repo_dir.resolve() != tool_dir.resolve():
         dest_scripts = tool_dir / "scripts"
         dest_scripts.mkdir(parents=True, exist_ok=True)
         for f in scripts_src.glob("*.sh"):

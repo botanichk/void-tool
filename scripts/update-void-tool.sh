@@ -43,6 +43,6 @@ git -C "$REPO_DIR" pull origin "$branch"
 echo "✓ Репозиторий обновлён"
 
 # self-install
-"$REPO_DIR/void-tool" self-install
+"$REPO_DIR/void-tool" self-install --source "$REPO_DIR"
 
 echo "✅ void-tool обновлён. Перезагрузи оболочку: exec \$SHELL"
