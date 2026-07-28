@@ -8,9 +8,16 @@ xbps_ensure_repo_and_bootstrap() {
     fi
 
     local VP="$REAL_HOME/void-packages"
+    if [[ -d "$VP" && ! -f "$VP/xbps-src" ]]; then
+        echo "⚠️  void-packages повреждён (нет xbps-src), удаляю и клонирую заново..."
+        rm -rf "$VP"
+    fi
     if [[ ! -d "$VP" ]]; then
         echo "📥 Клонирую void-packages..."
-        git clone https://github.com/void-linux/void-packages.git "$VP"
+        if ! git clone --depth 1 https://github.com/void-linux/void-packages.git "$VP"; then
+            echo "❌ Ошибка клонирования void-packages"
+            return 1
+        fi
     fi
     if [[ ! -d "$VP/masterdir" ]]; then
         echo "🔧 Выполняю binary-bootstrap..."
@@ -67,11 +74,7 @@ xbps_install_package() {
     echo "📦 Устанавливаю..."
     local repo="$REAL_HOME/void-packages/hostdir/binpkgs"
     local cmd
-    if command -v xi &>/dev/null; then
-        cmd="xi -y $pkg"
-    else
-        cmd="xbps-install -y --repository=$repo $pkg"
-    fi
+    cmd="xbps-install -y --repository=$repo $pkg"
 
     if sudo -n true 2>/dev/null; then
         sudo $cmd
