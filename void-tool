@@ -45,6 +45,11 @@ script = "install-pipewire.sh"
 [modules.void-tool]
 enabled = true
 script = "update-void-tool.sh"
+
+[modules.fastfetch-img]
+enabled = true
+update = false
+script = "install-fastfetch-img.sh"
 """
 
 TOOL_NAME = "void-tool"
@@ -604,7 +609,7 @@ _void-tool_completions() {
         COMPREPLY=($(compgen -W "install update fix clean info search trigger completions menu self-install setup" -- "$cur"))
     elif [[ $COMP_CWORD -eq 2 ]]; then
         case "$prev" in
-            install) COMPREPLY=($(compgen -W "zen ppqt nvidia nvidia-32bit pipewire void-tool" -- "$cur")) ;;
+            install) COMPREPLY=($(compgen -W "zen ppqt nvidia nvidia-32bit pipewire void-tool fastfetch-img" -- "$cur")) ;;
             update)  COMPREPLY=($(compgen -W "check status $(void-tool _list_modules 2>/dev/null)" -- "$cur")) ;;
             fix)     COMPREPLY=($(compgen -W "health" -- "$cur")) ;;
             clean)   COMPREPLY=($(compgen -W "builds cache prefixes kernels" -- "$cur")) ;;
@@ -632,7 +637,7 @@ _void-tool() {
             ;;
         args)
             case $words[2] in
-                install) _values 'package' zen ppqt nvidia nvidia-32bit pipewire void-tool ;;
+                install) _values 'package' zen ppqt nvidia nvidia-32bit pipewire void-tool fastfetch-img ;;
                 update)  _values 'action' check status $(void-tool _list_modules 2>/dev/null) ;;
                 fix)     _values 'target' health ;;
                 setup)   _values 'action' all ;;
@@ -1156,6 +1161,7 @@ def cmd_menu(args=None):
         ("Install — NVIDIA Drivers",       lambda: cmd_install(argparse.Namespace(packages=["nvidia"]))),
         ("Install — PipeWire (Void)",      lambda: cmd_install(argparse.Namespace(packages=["pipewire"]))),
         ("Install — NVIDIA 32-bit libs",   lambda: cmd_install(argparse.Namespace(packages=["nvidia-32bit"]))),
+        ("Install — fastfetch (images)",    lambda: cmd_install(argparse.Namespace(packages=["fastfetch-img"]))),
         ("─── search ──────────────────────", None),
         ("Search — packages (xbps/flatpak/appimage)", lambda: _search_menu()),
         ("─── info ────────────────────────", None),
@@ -1234,8 +1240,8 @@ def make_parser():
 
     # install
     pi = sub.add_parser("install", help="Install a package (zen, ppqt, nvidia, nvidia-32bit, pipewire)")
-    pi.add_argument("packages", nargs="+", choices=["zen", "ppqt", "nvidia", "nvidia-32bit", "pipewire", "void-tool"],
-                    help="Package(s) to install — zen, ppqt, nvidia, nvidia-32bit, pipewire, void-tool")
+    pi.add_argument("packages", nargs="+", choices=["zen", "ppqt", "nvidia", "nvidia-32bit", "pipewire", "void-tool", "fastfetch-img"],
+                    help="Package(s) to install — zen, ppqt, nvidia, nvidia-32bit, pipewire, void-tool, fastfetch-img")
 
     # update
     pu = sub.add_parser("update", help="Update modules or check status")
