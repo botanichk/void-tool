@@ -94,8 +94,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/xbps-build-common.sh
 source "$SCRIPT_DIR/xbps-build-common.sh"
 
-xbps_ensure_repo_and_bootstrap || { mv "$TEMPLATE.bak" "$TEMPLATE" 2>/dev/null || true; exit 1; }
-xbps_sync_repo_and_masterdir || { mv "$TEMPLATE.bak" "$TEMPLATE" 2>/dev/null || true; exit 1; }
 if ! xbps_build_with_retry "$PKGNAME"; then
     mv "$TEMPLATE.bak" "$TEMPLATE"
     exit 1
