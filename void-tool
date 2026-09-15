@@ -554,7 +554,7 @@ def cmd_clean_kernels(args):
                            capture_output=True, text=True, timeout=30)
         print(gr("готово") if r.returncode == 0 else rd(f"ошибка: {r.stderr.strip()[:80]}"))
 
-    remain = sum(1 for v, _, _ in versions if boot.glob(f"vmlinuz-{v}*"))
+    remain = len(list(boot.glob("vmlinuz-*")))
     print(f"\n  {gr('✓')} Готово. Осталось ядер: {remain}")
     return 0
 
