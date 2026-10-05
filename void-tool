@@ -451,20 +451,10 @@ def cmd_clean_kernels(args):
 
     versions.sort(key=lambda x: x[1])
 
-    series_groups = {}
-    for v, key, s in versions:
-        series_groups.setdefault(s, []).append(v)
-
-    protected = set()
-    for s, vers in series_groups.items():
-        vers_sorted = sorted(vers, key=_parse, reverse=True)
-        for i, v in enumerate(vers_sorted):
-            if i < 2 or v == current:
-                protected.add(v)
-
-    candidates = [v for v, _, _ in versions if v not in protected]
-    # Also mark what vkpurge can handle
-    vkpurge_candidates = set(vkpurge_list) & set(candidates)
+    # vkpurge знает какие ядра осиротели (пакет удалён) — доверяем ему
+    vkpurge_candidates = {v for v in vkpurge_list if v != current}
+    protected = {v for v, _, _ in versions if v not in vkpurge_candidates}
+    candidates = [v for v, _, _ in versions if v in vkpurge_candidates]
 
     print(f"\n  {'#':<4} {'Версия':<18} {'Серия':<7} {'Размер':>7}  {'Статус'}")
     print(f"  {'─'*4} {'─'*18} {'─'*7} {'─'*7}  {'─'*14}")
@@ -480,8 +470,8 @@ def cmd_clean_kernels(args):
             st = rd("вручную")
         print(f"  {i:<4} {v:<18} {s:<7} {sz/1024:>6.0f}K  {st}")
 
-    print(f"\n  {bl('ℹ')} Защищено: {len(protected)} (2 последних в серии + текущее)")
-    print(f"  {bl('ℹ')} К удалению: {len(candidates)} ({len(vkpurge_candidates)} через vkpurge)")
+    print(f"\n  {bl('ℹ')} Защищено: {len(protected)} (текущее + установленные)")
+    print(f"  {bl('ℹ')} К удалению: {len(candidates)} (через vkpurge)")
     if not candidates:
         print(f"  {gr('✓')} Нечего удалять")
         return 0
@@ -548,7 +538,7 @@ def cmd_clean_kernels(args):
                     freed += sz
             print(gr("готово"))
 
-    if any(v not in vkpurge_candidates for v in selected):
+    if selected:
         print(f"  ⟳ Обновление GRUB...", end=" ", flush=True)
         r = subprocess.run(["sudo", "grub-mkconfig", "-o", "/boot/grub/grub.cfg"],
                            capture_output=True, text=True, timeout=30)
